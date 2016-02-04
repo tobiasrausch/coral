@@ -1,3 +1,7 @@
+.htslib
+.boost
+src/streq
+
 # Compiled Object files
 *.slo
 *.lo
