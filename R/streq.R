@@ -18,6 +18,7 @@ scienceTheme=theme(panel.grid.major=element_blank(), panel.grid.minor=element_bl
 ids = as.character(unique(x$id))
 for (localid in ids) {
     png(paste0(localid, ".png"), width=800, height=400)
+    #pdf(paste0(localid, ".pdf"), width=8, height=4)
     grid.newpage()
     pushViewport(viewport(layout=grid.layout(1,1)))
     subset=x[x$id==localid,]
