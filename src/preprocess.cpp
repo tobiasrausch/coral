@@ -45,7 +45,8 @@ using namespace streq;
 struct Config {
   unsigned short minMapQual;
   uint32_t window;
-  boost::filesystem::path preOutput;
+  boost::filesystem::path ww;
+  boost::filesystem::path wc;
   std::vector<boost::filesystem::path> files;
 };
 
@@ -63,7 +64,8 @@ int main(int argc, char **argv) {
     ("help,?", "show help message")
     ("map-qual,q", boost::program_options::value<unsigned short>(&c.minMapQual)->default_value(1), "min. mapping quality")
     ("window,w", boost::program_options::value<uint32_t>(&c.window)->default_value(1000000), "window length")
-    ("preout,p", boost::program_options::value<boost::filesystem::path>(&c.preOutput)->default_value("pre.out"), "output preprocessing info")
+    ("samestrand,s", boost::program_options::value<boost::filesystem::path>(&c.ww)->default_value("ww.bam"), "output same strand bam")
+    ("diffstrand,d", boost::program_options::value<boost::filesystem::path>(&c.wc)->default_value("wc.bam"), "output different strand bam")
     ;
 
   boost::program_options::options_description hidden("Hidden options");
@@ -83,7 +85,7 @@ int main(int argc, char **argv) {
   boost::program_options::notify(vm);
 
   // Check command line arguments
-  if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("preout"))) {
+  if ((vm.count("help")) || (!vm.count("input-file"))) {
     std::cout << "Usage: " << argv[0] << " [OPTIONS] <strand.seq1.bam> <strand.seq2.bam> ... <strand.seqN.bam>" << std::endl;
     std::cout << visible_options << "\n";
     return 1;
@@ -122,20 +124,22 @@ int main(int argc, char **argv) {
 
   // Calculate valid windows
   typedef uint32_t TPos;
-  typedef uint32_t TFileIndex;
-  typedef std::pair<TPos, TFileIndex> TPosFilePair;
-  typedef std::vector<TPosFilePair> TWindowList;
-  typedef std::vector<TWindowList> TGenomicWindows;
-  TGenomicWindows watsonWindows;
-  watsonWindows.resize(hdr->n_targets);
-  TGenomicWindows crickWindows;
-  crickWindows.resize(hdr->n_targets);
-  TGenomicWindows wcWindows;
-  wcWindows.resize(hdr->n_targets);
+  typedef std::set<TPos> TWindowSet;
+  typedef std::vector<TWindowSet> TGenomicWindows;
+  typedef std::vector<TGenomicWindows> TFileWindows;
+  TFileWindows watsonWindows;
+  watsonWindows.resize(c.files.size());
+  for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) watsonWindows[file_c].resize(hdr->n_targets);
+  TFileWindows crickWindows;
+  crickWindows.resize(c.files.size());
+  for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) crickWindows[file_c].resize(hdr->n_targets);
+  TFileWindows wcWindows;
+  wcWindows.resize(c.files.size());
+  for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) wcWindows[file_c].resize(hdr->n_targets);
 
   // Parse bam (contig by contig)
   now = boost::posix_time::second_clock::local_time();
-  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Bam file parsing" << std::endl;
+  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "BAM file parsing" << std::endl;
   boost::progress_display show_progress( c.files.size() );
   for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
     ++show_progress;
@@ -203,7 +207,7 @@ int main(int argc, char **argv) {
 	  uint32_t sup = *itWatson + *itCrick;
 	  if ((sup > (c.window / 10000)) && (sup>lowerCutoff) && (sup<upperCutoff)) {
 	    double wTmpRatio = (double) *itWatson / (double) (sup);
-	    if (wTmpRatio > 0.8) watsonWindows[refIndex].push_back(std::make_pair(bin, file_c));
+	    if (wTmpRatio > 0.8) watsonWindows[file_c][refIndex].insert(bin);
 	  }
 	}
       } else if ((lowerW < 0.2) && (upperW < 0.2)) {
@@ -212,7 +216,7 @@ int main(int argc, char **argv) {
 	  uint32_t sup = *itWatson + *itCrick;
 	  if ((sup > (c.window / 10000)) && (sup>lowerCutoff) && (sup<upperCutoff)) {
 	    double wTmpRatio = (double) *itWatson / (double) (sup);
-	    if (wTmpRatio < 0.2) crickWindows[refIndex].push_back(std::make_pair(bin, file_c));
+	    if (wTmpRatio < 0.2) crickWindows[file_c][refIndex].insert(bin);
 	  }
 	}
       } else if ((lowerW > 0.3) && (upperW < 0.7)) {
@@ -221,7 +225,7 @@ int main(int argc, char **argv) {
 	  uint32_t sup = *itWatson + *itCrick;
 	  if ((sup > (c.window / 10000)) && (sup>lowerCutoff) && (sup<upperCutoff)) {
 	    double wTmpRatio = (double) *itWatson / (double) (sup);
-	    if ((wTmpRatio > 0.3) && (wTmpRatio < 0.7)) wcWindows[refIndex].push_back(std::make_pair(bin, file_c));
+	    if ((wTmpRatio > 0.3) && (wTmpRatio < 0.7)) wcWindows[file_c][refIndex].insert(bin);
 	  }
 	}
       }
@@ -229,26 +233,49 @@ int main(int argc, char **argv) {
   }
   
 
-  // Sort windows
-  for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
-    std::sort(watsonWindows[refIndex].begin(), watsonWindows[refIndex].end());
-    std::sort(crickWindows[refIndex].begin(), crickWindows[refIndex].end());
-    std::sort(wcWindows[refIndex].begin(), wcWindows[refIndex].end());
-  }
-
-  // Dump pre-processing information
+  // Write bam files
   now = boost::posix_time::second_clock::local_time();
-  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Output pre-processing information" << std::endl;
-  boost::progress_display sp( hdr->n_targets );
-
-  std::ofstream ofile(c.preOutput.string().c_str());
-  for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
-    ++sp;
-    for(TWindowList::iterator iW = watsonWindows[refIndex].begin(); iW != watsonWindows[refIndex].end(); ++iW) ofile << "0\t" << refIndex << '\t' << iW->first << '\t' << iW->second << '\t' << std::endl;
-    for(TWindowList::iterator iC = crickWindows[refIndex].begin(); iC != crickWindows[refIndex].end(); ++iC) ofile << "1\t" << refIndex << '\t' << iC->first << '\t' << iC->second << '\t' << std::endl;
-    for(TWindowList::iterator iWC = wcWindows[refIndex].begin(); iWC != wcWindows[refIndex].end(); ++iWC) ofile << "2\t" << refIndex << '\t' << iWC->first << '\t' << iWC->second << '\t' << std::endl;
+  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "BAM writing" << std::endl;
+  boost::progress_display spr( c.files.size() );
+  samFile* wwbam = sam_open(c.ww.string().c_str(), "wb");
+  if (wwbam == NULL) {
+    std::cerr << "Fail to open file " << c.ww.string() << std::endl;
+    return 1;
   }
-  ofile.close();
+  sam_hdr_write(wwbam, hdr);
+  samFile* wcbam = sam_open(c.wc.string().c_str(), "wb");
+  if (wcbam == NULL) {
+    std::cerr << "Fail to open file " << c.wc.string() << std::endl;
+    return 1;
+  }
+  sam_hdr_write(wcbam, hdr);
+  for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
+    ++spr;
+    for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
+      if (hdr->target_len[refIndex] < c.window) continue;
+      hts_itr_t* iter = sam_itr_queryi(idx[file_c], refIndex, 0, hdr->target_len[refIndex]);
+      bam1_t* rec = bam_init1();
+      while (sam_itr_next(samfile[file_c], iter, rec) >= 0) {
+	if (rec->core.flag & (BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FSUPPLEMENTARY | BAM_FUNMAP)) continue;
+	if ((rec->core.qual < c.minMapQual) || (rec->core.tid<0)) continue;
+	
+	int32_t pos = rec->core.pos + halfAlignmentLength(rec);
+	uint32_t bin = (int) (pos / c.window);
+	if (watsonWindows[file_c][refIndex].find(bin) != watsonWindows[file_c][refIndex].end()) sam_write1(wwbam, hdr, rec);
+	else if (crickWindows[file_c][refIndex].find(bin) != crickWindows[file_c][refIndex].end()) {
+	  rec->core.flag ^= BAM_FREVERSE;
+	  rec->core.flag ^= BAM_FMREVERSE;
+	  sam_write1(wwbam, hdr, rec);
+	} 
+	else if (wcWindows[file_c][refIndex].find(bin) != wcWindows[file_c][refIndex].end()) sam_write1(wcbam, hdr, rec);
+      }
+      bam_destroy1(rec);
+      hts_itr_destroy(iter);
+    }
+  }
+  sam_close(wcbam);
+  sam_close(wwbam);
+
 
   // Close bam
   bam_hdr_destroy(hdr);
