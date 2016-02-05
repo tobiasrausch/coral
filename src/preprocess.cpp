@@ -1,8 +1,8 @@
 /*
 ============================================================================
-Strand-Seq Watson-Crick Counter
+Strand-Seq Watson-Crick Classifier
 ============================================================================
-Copyright (C) 2015 Tobias Rausch
+Copyright (C) 2016 Tobias Rausch
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -38,6 +38,9 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include <boost/progress.hpp>
 #include <htslib/sam.h>
 
+#include "util.h"
+
+using namespace streq;
 
 struct Config {
   unsigned short minMapQual;
@@ -45,15 +48,6 @@ struct Config {
   boost::filesystem::path preOutput;
   std::vector<boost::filesystem::path> files;
 };
-
-inline int32_t halfAlignmentLength(bam1_t* rec) {
-  uint32_t* cigar = bam_get_cigar(rec);
-  unsigned int alen = 0;
-  for (unsigned int i = 0; i < rec->core.n_cigar; ++i)
-    if (bam_cigar_op(cigar[i]) == BAM_CMATCH) alen+=bam_cigar_oplen(cigar[i]);
-  return (alen / 2);
-}
-
 
 int main(int argc, char **argv) {
 
