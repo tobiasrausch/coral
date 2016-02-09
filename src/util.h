@@ -27,13 +27,17 @@ Contact: Tobias Rausch (rausch@embl.de)
 namespace streq
 {
 
-inline int32_t halfAlignmentLength(bam1_t* rec) {
-  uint32_t* cigar = bam_get_cigar(rec);
-  unsigned int alen = 0;
-  for (unsigned int i = 0; i < rec->core.n_cigar; ++i)
-    if (bam_cigar_op(cigar[i]) == BAM_CMATCH) alen+=bam_cigar_oplen(cigar[i]);
-  return (alen / 2);
-}
+  inline int32_t alignmentLength(bam1_t const* rec) {
+    uint32_t* cigar = bam_get_cigar(rec);
+    unsigned int alen = 0;
+    for (unsigned int i = 0; i < rec->core.n_cigar; ++i)
+      if (bam_cigar_op(cigar[i]) == BAM_CMATCH) alen+=bam_cigar_oplen(cigar[i]);
+    return alen;
+  }
+
+  inline int32_t halfAlignmentLength(bam1_t const* rec) {
+    return (alignmentLength(rec) / 2);
+  }
 
 }
 
