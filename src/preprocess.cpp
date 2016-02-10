@@ -414,9 +414,28 @@ int main(int argc, char **argv) {
 
   // Generate Watson Ratio Statistics
   std::sort(wRatio.begin(), wRatio.end());
-  double crickCut = wRatio[(int) (wRatio.size()/4)];
-  double watsonCut = wRatio[(int) (3*wRatio.size()/4)];
-  std::vector<float> homfraction;
+  uint32_t binCount = (std::pow(wRatio.size(), 0.1/0.3) * (wRatio[wRatio.size()-1] - wRatio[0])) / (wRatio[(int) (3*wRatio.size()/4)] - wRatio[(int) (wRatio.size()/4)]);
+  std::vector<uint32_t> histogram;
+  histogram.resize(binCount + 1, 0);
+  for(std::size_t k = 0; k<wRatio.size(); ++k) ++histogram[(int)(wRatio[k]*binCount)];
+  uint32_t smallestBinVal = histogram[0];
+  double crickCut = 0;
+  for(std::size_t i = 0; i<binCount/2; ++i) {
+    if (histogram[i] < smallestBinVal) {
+      smallestBinVal = histogram[i];
+      crickCut = (double) i / (double) binCount;
+    }
+  }
+  smallestBinVal = histogram[binCount];
+  double watsonCut = 1;
+  for(std::size_t i = binCount; i>binCount/2; --i) {
+    if (histogram[i] < smallestBinVal) {
+      smallestBinVal = histogram[i];
+      watsonCut = (double) i / (double) binCount;
+    }
+  }
+  std::vector<float> watfraction;
+  std::vector<float> crifraction;
   for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
     if (hdr->target_len[refIndex] < c.window) continue;
     uint32_t bins = hdr->target_len[refIndex] / c.window + 1;
@@ -434,19 +453,24 @@ int main(int argc, char **argv) {
 	}
 	crickFraction /= (float) binWRatio.size();
 	watsonFraction /= (float) binWRatio.size();
-	homfraction.push_back(crickFraction);
-	homfraction.push_back(watsonFraction);
+	crifraction.push_back(crickFraction);
+	watfraction.push_back(watsonFraction);
       }
     }
   }
-  float hommedian = 0;
-  _getMedian(homfraction.begin(), homfraction.end(), hommedian);
-  float hommad = 0;
-  _getMAD(homfraction.begin(), homfraction.end(), hommedian, hommad);
-  std::cout << "Strand-Seq statistics: Crick cut=" << crickCut << ", Watson cut=" << watsonCut << ", Median Watson and Crick fraction=" << hommedian << ", MAD=" << hommad << std::endl;
-  float fracDev = 3 * hommad;
-  float upperFracBound = hommedian + fracDev;
-  float lowerFracBound = hommedian - fracDev;
+  float watmedian = 0;
+  _getMedian(watfraction.begin(), watfraction.end(), watmedian);
+  float watmad = 0;
+  _getMAD(watfraction.begin(), watfraction.end(), watmedian, watmad);
+  float crimedian = 0;
+  _getMedian(crifraction.begin(), crifraction.end(), crimedian);
+  float crimad = 0;
+  _getMAD(crifraction.begin(), crifraction.end(), crimedian, crimad);
+  std::cout << "Strand-Seq statistics: Crick cut=" << crickCut << ", Watson cut=" << watsonCut << ", Median Watson fraction=" << watmedian << ", MAD=" << watmad << ", Median Crick fraction=" << crimedian << ", MAD=" << crimad << std::endl;
+  float upperWatFracBound = watmedian + 3 * watmad;
+  float lowerWatFracBound = watmedian - 3 * watmad;
+  float upperCriFracBound = crimedian + 3 * crimad;
+  float lowerCriFracBound = crimedian - 3 * crimad;
   
   // Black-list bins
   unsigned int numwhitelist=0;
@@ -474,7 +498,7 @@ int main(int argc, char **argv) {
 	}
 	crickFraction /= (float) binWRatio.size();
 	watsonFraction /= (float) binWRatio.size();
-	if ((crickFraction < lowerFracBound) || (watsonFraction < lowerFracBound) || (crickFraction > upperFracBound) || (watsonFraction > upperFracBound)) validBin = false;
+	if ((crickFraction < lowerCriFracBound) || (watsonFraction < lowerWatFracBound) || (crickFraction > upperCriFracBound) || (watsonFraction > upperWatFracBound)) validBin = false;
       } else validBin = false;
       if (!validBin) {
 	++numblacklist;
@@ -505,11 +529,11 @@ int main(int argc, char **argv) {
   uint32_t wWindowCount = 0;
   uint32_t cWindowCount = 0;
   uint32_t wcWindowCount = 0;
-  double watsonBound = std::min(0.9, watsonCut + fracDev);
-  double crickBound = std::max(0.1, crickCut - fracDev);
-  double lWCBound = std::max(crickCut + fracDev, 0.25);
+  double watsonBound = std::min(0.9, watsonCut + 3 * watmad);
+  double crickBound = std::max(0.1, crickCut - 3 * crimad);
+  double lWCBound = std::max(crickCut + 3 * crimad, 0.25);
   lWCBound = std::min(0.4, lWCBound);
-  double uWCBound = std::min(watsonCut - fracDev, 0.75);
+  double uWCBound = std::min(watsonCut - 3 * watmad, 0.75);
   uWCBound = std::max(0.6, uWCBound);
   for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
     for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
