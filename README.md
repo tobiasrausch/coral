@@ -15,4 +15,7 @@ The pre-processing method categorizes Watson-Watson, Crick-Crick and Watson-Cric
 
 `./src/preprocess -v ./data/csnp.hg38.bcf -s HG00512.ww.bam -d HG00512.wc.bam single_cell_HG00512_bam/*.bam`
 
+`samtools sort HG00512.ww.bam HG00512.ww.sort && samtools index HG00512.ww.sort.bam`
+
+`samtools sort HG00512.wc.bam HG00512.wc.sort && samtools index HG00512.wc.sort.bam`
 
