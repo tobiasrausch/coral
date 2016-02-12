@@ -34,12 +34,15 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include <boost/program_options/variables_map.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/date_time/gregorian/gregorian.hpp>
+#include <boost/tuple/tuple.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/progress.hpp>
 #include <htslib/sam.h>
 #include <htslib/vcf.h>
 
-#include "util.h"
+#include "strandutil.h"
+#include "strandsnp.h"
+#include "strandhaplo.h"
 
 using namespace streq;
 
@@ -52,191 +55,6 @@ struct Config {
   boost::filesystem::path variation;
   std::vector<boost::filesystem::path> files;
 };
-
-struct Snp {
-  uint32_t pos;
-  char ref;
-  char alt;
-  
-  Snp(uint32_t p, char r, char a) : pos(p), ref(r), alt(a) {}
-};
-
-struct RACount {
-  uint16_t watsonRef;
-  uint16_t watsonAlt;
-  uint16_t crickRef;
-  uint16_t crickAlt;
-  uint16_t falseBase;
-  
-  RACount() : watsonRef(0), watsonAlt(0), crickRef(0), crickAlt(0), falseBase(0) {}
-  RACount(uint16_t wr, uint16_t wa, uint16_t cr, uint16_t ca, uint16_t f) : watsonRef(wr), watsonAlt(wa), crickRef(cr), crickAlt(ca), falseBase(f) {}
-};
-
-
-template<typename TRecord>
-struct SortSnps : public std::binary_function<TRecord, TRecord, bool>
-{
-  inline bool operator()(TRecord const& s1, TRecord const& s2) const {
-    return s1.pos < s2.pos;
-  }
-};
-
-
-template<typename TIterator, typename TValue>
-inline void
-_getMedian(TIterator begin, TIterator end, TValue& median) {
-  std::nth_element(begin, begin + (end - begin) / 2, end);
-  median = *(begin + (end - begin) / 2);
-}
-
-template<typename TIterator, typename TValue>
-inline void
-_getMAD(TIterator begin, TIterator end, TValue median, TValue& mad) {
-  std::vector<TValue> absDev;
-  for(;begin<end;++begin)
-    absDev.push_back(std::abs((TValue)*begin - median));
-  _getMedian(absDev.begin(), absDev.end(), mad);
-}
-
-template<typename TConfig, typename TGenomicSnps>
-inline int32_t 
-_loadVariationData(TConfig const& c, bam_hdr_t const* hdr, TGenomicSnps& snps) {
-  typedef typename TGenomicSnps::value_type TSnpVector;
-  typedef typename TSnpVector::value_type TSnp;
-
-  // Open VCF file
-  htsFile* ifile = bcf_open(c.variation.string().c_str(), "r");
-  if (ifile == NULL) {
-    std::cerr << "SNP VCF files is missing " << c.variation.string() << std::endl;
-    return 1;
-  }
-  hts_idx_t* bcfidx = bcf_index_load(c.variation.string().c_str());
-  if (bcfidx == NULL) {
-    std::cerr << "SNP VCF index file is missing " << c.variation.string() << std::endl;
-    return 1;
-  }
-  bcf_hdr_t* vcfh = bcf_hdr_read(ifile);
-    
-  // Load SNPs
-  snps.clear();
-  snps.resize(hdr->n_targets);
-  for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
-    if (hdr->target_len[refIndex] < c.window) continue;
-    std::string chrName(hdr->target_name[refIndex]);
-    uint32_t chrid = bcf_hdr_name2id(vcfh, chrName.c_str());
-    hts_itr_t* itervcf = bcf_itr_queryi(bcfidx, chrid, 0, hdr->target_len[refIndex]);
-    bcf1_t* var = bcf_init();
-    while (bcf_itr_next(ifile, itervcf, var) >= 0) {
-      bcf_unpack(var, BCF_UN_STR);
-      std::vector<std::string> alleles;
-      for(std::size_t i = 0; i<var->n_allele; ++i) alleles.push_back(std::string(var->d.allele[i]));
-      // Only bi-allelic SNPs
-      if ((alleles.size() == 2) && (alleles[0].size() == 1) && (alleles[1].size() == 1)) snps[refIndex].push_back(TSnp(var->pos, alleles[0][0], alleles[1][0]));
-    }
-    bcf_destroy(var);
-    hts_itr_destroy(itervcf);
-
-    // Sort Snps
-    std::sort(snps[refIndex].begin(), snps[refIndex].end(), SortSnps<TSnp>());
-  }
-  // Close VCF
-  bcf_hdr_destroy(vcfh);
-  hts_idx_destroy(bcfidx);
-  bcf_close(ifile);
-
-  return 0;
-}
-
-template<typename TSnpVector, typename TCountVector>
-inline void
-_refAltCount(bam1_t const* rec, TSnpVector const& snps, TCountVector& chrCounts) {
-  typedef typename TSnpVector::value_type TSnp;
-  
-  // Annotate SNPs
-  typename TSnpVector::const_iterator iSnp = std::lower_bound(snps.begin(), snps.end(), TSnp(rec->core.pos, 'A', 'A'), SortSnps<TSnp>());
-  typename TSnpVector::const_iterator iSnpEnd = std::upper_bound(snps.begin(), snps.end(), TSnp(rec->core.pos + alignmentLength(rec), 'A', 'A'), SortSnps<TSnp>());
-  if (iSnp != iSnpEnd) {
-    std::string sequence;
-    sequence.resize(rec->core.l_qseq);
-    uint8_t* seqptr = bam_get_seq(rec);
-    for (int i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
-    uint32_t* cigar = bam_get_cigar(rec);
-    for(;iSnp != iSnpEnd; ++iSnp) {
-      int32_t gp = rec->core.pos; // Genomic position
-      int32_t sp = 0; // Sequence position
-      bool foundChar = false;
-      for (std::size_t i = 0; i < rec->core.n_cigar; ++i) {
-	if (bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) sp += bam_cigar_oplen(cigar[i]);
-	else if (bam_cigar_op(cigar[i]) == BAM_CINS) sp += bam_cigar_oplen(cigar[i]);
-	else if (bam_cigar_op(cigar[i]) == BAM_CDEL) gp += bam_cigar_oplen(cigar[i]);
-	else if (bam_cigar_op(cigar[i]) == BAM_CMATCH) {
-	  if (gp + bam_cigar_oplen(cigar[i]) < iSnp->pos) {
-	    gp += bam_cigar_oplen(cigar[i]);
-	    sp += bam_cigar_oplen(cigar[i]);
-	  } else {
-	    for(std::size_t k = 0; k<bam_cigar_oplen(cigar[i]); ++k, ++sp, ++gp) {
-	      if (gp == iSnp->pos) {
-		foundChar = true;
-		break;
-	      }
-	    }
-	    if (foundChar) break;
-	  }
-	}
-      }
-      if (foundChar) {
-	if (sequence[sp] == iSnp->ref) { 
-	  if (rec->core.flag & BAM_FREAD1) 
-	    if (rec->core.flag & BAM_FREVERSE) ++chrCounts[(uint32_t) (iSnp - snps.begin())].crickRef;
-	    else ++chrCounts[(uint32_t) (iSnp - snps.begin())].watsonRef;
-	  else
-	    if (rec->core.flag & BAM_FREVERSE) ++chrCounts[(uint32_t) (iSnp - snps.begin())].watsonRef;
-	    else ++chrCounts[(uint32_t) (iSnp - snps.begin())].crickRef;
-	} else if (sequence[sp] == iSnp->alt) {
-	  if (rec->core.flag & BAM_FREAD1) 
-	    if (rec->core.flag & BAM_FREVERSE) ++chrCounts[(uint32_t) (iSnp - snps.begin())].crickAlt;
-	    else ++chrCounts[(uint32_t) (iSnp - snps.begin())].watsonAlt;
-	  else
-	    if (rec->core.flag & BAM_FREVERSE) ++chrCounts[(uint32_t) (iSnp - snps.begin())].watsonAlt;
-	    else ++chrCounts[(uint32_t) (iSnp - snps.begin())].crickAlt;
-	} else ++chrCounts[(uint32_t) (iSnp - snps.begin())].falseBase;
-      }
-    }
-  }
-}
-
-
-template<typename TRefAltCount>
-inline bool
-_getWatsonAllele(TRefAltCount const& ra, bool& allele) {
-  uint32_t watsonCount = ra.watsonRef + ra.watsonAlt;
-  if (watsonCount > 0) {
-    if (ra.watsonRef > 2*ra.watsonAlt) {
-      allele = false;
-      return true;
-    } else if (2 * ra.watsonRef < ra.watsonAlt) {
-      allele = true;
-      return true;
-    }
-  }
-  return false;
-}
-
-template<typename TRefAltCount>
-inline bool
-_getCrickAllele(TRefAltCount const& ra, bool& allele) {
-  uint32_t crickCount = ra.crickRef + ra.crickAlt;
-  if (crickCount > 0) {
-    if (ra.crickRef > 2*ra.crickAlt) {
-      allele = false;
-      return true;
-    } else if (2 * ra.crickRef < ra.crickAlt) {
-      allele = true;
-      return true;
-    }
-  }
-  return false;
-}
 
 
 int main(int argc, char **argv) {
@@ -344,15 +162,17 @@ int main(int argc, char **argv) {
     }
   }
 
-  // Parse bam (contig by contig)
+  // Watson Ratio counts
   typedef float TWRatio;
   typedef std::vector<TWRatio> TWRatioVector;
+  TWRatioVector wRatio;
   typedef std::vector<TWRatioVector> TGenomicWRatio;
   typedef std::vector<TGenomicWRatio> TFileWRatio;
   TFileWRatio fWR;
   fWR.resize(c.files.size());
   for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) fWR[file_c].resize(hdr->n_targets);
-  TWRatioVector wRatio;
+
+  // Parse bam (contig by contig)
   now = boost::posix_time::second_clock::local_time();
   std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "BAM file parsing" << std::endl;
   boost::progress_display show_progress( c.files.size() );
@@ -363,11 +183,8 @@ int main(int argc, char **argv) {
       uint32_t bins = hdr->target_len[refIndex] / c.window + 1;
       fWR[file_c][refIndex].resize(bins);
       typedef std::vector<uint32_t> TCounter;
-      TCounter watsonCount;
-      TCounter crickCount;
-      watsonCount.resize(bins, 0);
-      crickCount.resize(bins, 0);
-      
+      TCounter watsonCount(bins, 0);
+      TCounter crickCount(bins, 0);
       hts_itr_t* iter = sam_itr_queryi(idx[file_c], refIndex, 0, hdr->target_len[refIndex]);
       bam1_t* rec = bam_init1();
       while (sam_itr_next(samfile[file_c], iter, rec) >= 0) {
@@ -385,26 +202,15 @@ int main(int argc, char **argv) {
       }
       bam_destroy1(rec);
       hts_itr_destroy(iter);
-      
-      // Get reads per window
-      TCounter support;
-      support.resize(bins, 0);
-      TCounter::iterator itSupport = support.begin();
-      TCounter::const_iterator itWatson = watsonCount.begin();
-      TCounter::const_iterator itCrick =crickCount.begin();
-      for(std::size_t bin = 0; bin < bins; ++itWatson, ++itCrick, ++itSupport, ++bin) 
-	*itSupport = *itWatson + *itCrick;
-      std::sort(support.begin(), support.end());
-      uint32_t lowerCutoff = support[(int) (bins/100)];
-      support.clear();
-      
+            
       // Get Watson Ratio
-      itWatson = watsonCount.begin();
-      itCrick =crickCount.begin();
+      uint32_t lowerReadSupportCutoff = _getReadSupportPercentile(watsonCount, crickCount, 1);
+      TCounter::const_iterator itWatson = watsonCount.begin();
+      TCounter::const_iterator itCrick = crickCount.begin();
       for(std::size_t bin = 0; bin < bins; ++itWatson, ++itCrick, ++bin) {
 	uint32_t sup = *itWatson + *itCrick;
 	// At least 1 read every 10,000 bases
-	if ((sup > (c.window / 10000)) && (sup>lowerCutoff)) {
+	if ((sup > (c.window / 10000)) && (sup > lowerReadSupportCutoff)) {
 	  fWR[file_c][refIndex][bin] = ((float) *itWatson / (float) (sup));
 	  wRatio.push_back(((float) *itWatson / (float) (sup)));
 	} else fWR[file_c][refIndex][bin] = -1;
@@ -412,66 +218,50 @@ int main(int argc, char **argv) {
     }
   }
 
-  // Generate Watson Ratio Statistics
-  std::sort(wRatio.begin(), wRatio.end());
-  uint32_t binCount = (std::pow(wRatio.size(), 0.1/0.3) * (wRatio[wRatio.size()-1] - wRatio[0])) / (wRatio[(int) (3*wRatio.size()/4)] - wRatio[(int) (wRatio.size()/4)]);
-  std::vector<uint32_t> histogram;
-  histogram.resize(binCount + 1, 0);
-  for(std::size_t k = 0; k<wRatio.size(); ++k) ++histogram[(int)(wRatio[k]*binCount)];
-  uint32_t smallestBinVal = histogram[0];
-  double crickCut = 0;
-  for(std::size_t i = 0; i<binCount/2; ++i) {
-    if (histogram[i] < smallestBinVal) {
-      smallestBinVal = histogram[i];
-      crickCut = (double) i / (double) binCount;
-    }
-  }
-  smallestBinVal = histogram[binCount];
-  double watsonCut = 1;
-  for(std::size_t i = binCount; i>binCount/2; --i) {
-    if (histogram[i] < smallestBinVal) {
-      smallestBinVal = histogram[i];
-      watsonCut = (double) i / (double) binCount;
-    }
-  }
+  // Get global optimal watson and crick threshold
+  float crickCut = 0;
+  float watsonCut = 0;
+  boost::tie(crickCut, watsonCut) = _biModalMinima(wRatio);
+  wRatio.clear();
+
+  // Black-listing variation/repeat/outlier bins across cells
   std::vector<float> watfraction;
   std::vector<float> crifraction;
   for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
     if (hdr->target_len[refIndex] < c.window) continue;
     uint32_t bins = hdr->target_len[refIndex] / c.window + 1;
     for(std::size_t bin = 0; bin < bins; ++bin) {
-      TWRatioVector binWRatio;
+      uint32_t totalCells = 0;
+      float crickFraction = 0;
+      float watsonFraction = 0;
       for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
-	if (fWR[file_c][refIndex][bin] != -1) binWRatio.push_back(fWR[file_c][refIndex][bin]);
-      }
-      if (binWRatio.size() > (c.files.size() / 2)) {
-	float crickFraction = 0;
-	float watsonFraction = 0;
-	for(std::size_t k = 0; k<binWRatio.size(); ++k) {
-	  if (binWRatio[k]<crickCut) ++crickFraction;
-	  if (binWRatio[k]>watsonCut) ++watsonFraction;
+	if (fWR[file_c][refIndex][bin] != -1) {
+	  ++totalCells;
+	  if (fWR[file_c][refIndex][bin] < crickCut) ++crickFraction;
+	  else if (fWR[file_c][refIndex][bin] > watsonCut) ++watsonFraction;
 	}
-	crickFraction /= (float) binWRatio.size();
-	watsonFraction /= (float) binWRatio.size();
+      }
+      if (totalCells > (c.files.size() / 2)) {
+	crickFraction /= (float) totalCells;
+	watsonFraction /= (float) totalCells;
 	crifraction.push_back(crickFraction);
 	watfraction.push_back(watsonFraction);
       }
     }
   }
-  float watmedian = 0;
-  _getMedian(watfraction.begin(), watfraction.end(), watmedian);
-  float watmad = 0;
-  _getMAD(watfraction.begin(), watfraction.end(), watmedian, watmad);
-  float crimedian = 0;
-  _getMedian(crifraction.begin(), crifraction.end(), crimedian);
-  float crimad = 0;
-  _getMAD(crifraction.begin(), crifraction.end(), crimedian, crimad);
-  std::cout << "Strand-Seq statistics: Crick cut=" << crickCut << ", Watson cut=" << watsonCut << ", Median Watson fraction=" << watmedian << ", MAD=" << watmad << ", Median Crick fraction=" << crimedian << ", MAD=" << crimad << std::endl;
-  float upperWatFracBound = watmedian + 3 * watmad;
-  float lowerWatFracBound = watmedian - 3 * watmad;
-  float upperCriFracBound = crimedian + 3 * crimad;
-  float lowerCriFracBound = crimedian - 3 * crimad;
-  
+  float watMedianFrac = 0;
+  float watMedianMAD = 0;
+  float criMedianFrac = 0;
+  float criMedianMAD = 0;
+  boost::tie(watMedianFrac, watMedianMAD) = _getWWStrandBounds(watfraction);
+  boost::tie(criMedianFrac, criMedianMAD) = _getWWStrandBounds(crifraction);
+  float lowerWatFracBound = watMedianFrac - 3 * watMedianMAD;
+  float upperWatFracBound = watMedianFrac + 3 * watMedianMAD;
+  float lowerCriFracBound = criMedianFrac - 3 * criMedianMAD;
+  float upperCriFracBound = criMedianFrac + 3 * criMedianMAD;
+  watfraction.clear();
+  crifraction.clear();
+
   // Black-list bins
   unsigned int numwhitelist=0;
   unsigned int numblacklist=0;  
@@ -482,22 +272,20 @@ int main(int argc, char **argv) {
     uint32_t bins = hdr->target_len[refIndex] / c.window + 1;
     for(std::size_t bin = 0; bin < bins; ++bin) {
       bool validBin = true;
-      TWRatioVector binWRatio;
+      uint32_t totalCells = 0;
+      float crickFraction = 0;
+      float watsonFraction = 0;
       for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
 	if (fWR[file_c][refIndex][bin] != -1) {
-	  binWRatio.push_back(fWR[file_c][refIndex][bin]);
+	  ++totalCells;
+	  if (fWR[file_c][refIndex][bin] < crickCut) ++crickFraction;
+	  else if (fWR[file_c][refIndex][bin] > watsonCut) ++watsonFraction;
 	  ++numhighcov;
 	} else ++numlowcov;
       }
-      if (binWRatio.size() > (c.files.size() / 2)) {
-	float crickFraction = 0;
-	float watsonFraction = 0;
-	for(std::size_t k = 0; k<binWRatio.size(); ++k) {
-	  if (binWRatio[k]<crickCut) ++crickFraction;
-	  if (binWRatio[k]>watsonCut) ++watsonFraction;
-	}
-	crickFraction /= (float) binWRatio.size();
-	watsonFraction /= (float) binWRatio.size();
+      if (totalCells > (c.files.size() / 2)) {
+	crickFraction /= (float) totalCells;
+	watsonFraction /= (float) totalCells;
 	if ((crickFraction < lowerCriFracBound) || (watsonFraction < lowerWatFracBound) || (crickFraction > upperCriFracBound) || (watsonFraction > upperWatFracBound)) validBin = false;
       } else validBin = false;
       if (!validBin) {
@@ -506,210 +294,67 @@ int main(int argc, char **argv) {
       }	else ++numwhitelist;
     }
   }
-  std::cout << "Bin statistics: #Whitelist=" << numwhitelist << ", #Blacklist=" << numblacklist << ", #HighCoverageWindows=" << numhighcov << ", #LowCoverageWindows=" << numlowcov << std::endl;
 
   // Categorize chromosomes based on white-listed bins
   typedef uint32_t TPos;
   typedef std::set<TPos> TWindowSet;
   typedef std::vector<TWindowSet> TGenomicWindows;
   typedef std::vector<TGenomicWindows> TFileWindows;
-  TFileWindows watsonWindows;
-  watsonWindows.resize(c.files.size());
-  for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) watsonWindows[file_c].resize(hdr->n_targets);
-  TFileWindows crickWindows;
-  crickWindows.resize(c.files.size());
-  for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) crickWindows[file_c].resize(hdr->n_targets);
-  TFileWindows wcWindows;
-  wcWindows.resize(c.files.size());
-  for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) wcWindows[file_c].resize(hdr->n_targets);
-  TFileWindows wcFlipWindows;
-  wcFlipWindows.resize(c.files.size());
-  for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) wcFlipWindows[file_c].resize(hdr->n_targets);
-
+  TFileWindows watsonWindows(c.files.size());
+  TFileWindows crickWindows(c.files.size());
+  TFileWindows wcWindows(c.files.size());
+  TFileWindows wcFlipWindows(c.files.size());
+  for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
+    watsonWindows[file_c].resize(hdr->n_targets);
+    crickWindows[file_c].resize(hdr->n_targets);
+    wcWindows[file_c].resize(hdr->n_targets);
+    wcFlipWindows[file_c].resize(hdr->n_targets);
+  }
   uint32_t wWindowCount = 0;
   uint32_t cWindowCount = 0;
   uint32_t wcWindowCount = 0;
-  double watsonBound = std::min(0.9, watsonCut + 3 * watmad);
-  double crickBound = std::max(0.1, crickCut - 3 * crimad);
-  double lWCBound = std::max(crickCut + 3 * crimad, 0.25);
-  lWCBound = std::min(0.4, lWCBound);
-  double uWCBound = std::min(watsonCut - 3 * watmad, 0.75);
-  uWCBound = std::max(0.6, uWCBound);
+  float watsonBound = std::min((float) 0.9, watsonCut + 3 * watMedianMAD);
+  float crickBound = std::max((float) 0.1, crickCut - 3 * criMedianMAD);
+  float lWCBound = std::min((float) 0.4, std::max(crickCut + 3 * criMedianMAD, (float) 0.25));
+  float uWCBound = std::max((float) 0.6, std::min(watsonCut - 3 * watMedianMAD, (float) 0.75));
   for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
     for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
       if (hdr->target_len[refIndex] < c.window) continue;
       uint32_t bins = hdr->target_len[refIndex] / c.window + 1;
       TWRatioVector chrWRatio;
-      for(std::size_t bin = 0; bin < bins; ++bin) {
+      for(std::size_t bin = 0; bin < bins; ++bin)
 	if (fWR[file_c][refIndex][bin] != -1) chrWRatio.push_back(fWR[file_c][refIndex][bin]);
-      }
-      // Debug chromosomal watson ratios
-      //std::cerr << refIndex << '\t' << file_c;
-      //for(int i = 0; i < chrWRatio.size(); ++i) std::cerr << '\t' << chrWRatio[i];
-      //std::cerr << std::endl;
-      std::sort(chrWRatio.begin(), chrWRatio.end());
-      uint32_t chrWRatioSize = chrWRatio.size();
-      if ((!chrWRatioSize) || (chrWRatioSize < bins/2)) continue;
+      if ((chrWRatio.empty()) || (chrWRatio.size() < bins/2)) continue;
 
       // Categorize chromosomes (exclude chromosomes with recombination events)
-      double lowerW = chrWRatio[(int) (chrWRatioSize/10)];
-      double upperW = chrWRatio[(int) (9*chrWRatioSize/10)];
+      std::sort(chrWRatio.begin(), chrWRatio.end());
+      TWRatio lowerW = chrWRatio[(int) (chrWRatio.size()/10)];
+      TWRatio upperW = chrWRatio[(int) (9*chrWRatio.size()/10)];
       if (lowerW >= watsonBound) {
 	// Hom. Watson
 	for(std::size_t bin = 0; bin < bins; ++bin) {
-	  //uint32_t sup = *itWatson + *itCrick;
-	  //if ((sup > (c.window / 10000)) && (sup>lowerCutoff)) {
-	  //double wTmpRatio = (double) *itWatson / (double) (sup);
-	  //if (wTmpRatio >= 0.8) 
 	  watsonWindows[file_c][refIndex].insert(bin);
 	  ++wWindowCount;
 	}
       } else if (upperW <= crickBound) {
 	// Hom. Crick
 	for(std::size_t bin = 0; bin < bins; ++bin) {
-	  //uint32_t sup = *itWatson + *itCrick;
-	  //if ((sup > (c.window / 10000)) && (sup>lowerCutoff)) {
-	  /// double wTmpRatio = (double) *itWatson / (double) (sup);
-	  //if (wTmpRatio <= 0.2) crickWindows[file_c][refIndex].insert(bin);
-	  //}
 	  crickWindows[file_c][refIndex].insert(bin);
 	  ++cWindowCount;
 	}
       } else if ((lowerW >= lWCBound) && (upperW <= uWCBound)) {
 	//WC
 	for(std::size_t bin = 0; bin < bins; ++bin) {
-      // uint32_t sup = *itWatson + *itCrick;
-      //  if ((sup > (c.window / 10000)) && (sup>lowerCutoff)) {
-      //    double wTmpRatio = (double) *itWatson / (double) (sup);
-      //    if ((wTmpRatio >= 0.4) && (wTmpRatio <= 0.6)) wcWindows[file_c][refIndex].insert(bin);
-      //  }
 	  wcWindows[file_c][refIndex].insert(bin);
 	  ++wcWindowCount;
 	}
       }
     }
   }
-  std::cout << "Watson-Watson: Range=[" << watsonBound << ",1], #WatsonWindows=" << wWindowCount << std::endl;
-  std::cout << "Crick-Crick: Range=[0," << crickBound << "], #CrickWindows=" << cWindowCount << std::endl;
-  std::cout << "Watson-Crick: Range=[" << lWCBound << "," << uWCBound << "], #WatsonCrickWindows=" << wcWindowCount << std::endl;
-  
+
   // Process variation data
-  if (c.hasVariationFile) {
-    now = boost::posix_time::second_clock::local_time();
-    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Process variation data" << std::endl;
-    boost::progress_display sprog( hdr->n_targets);
-    for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
-      ++sprog;
-      if (hdr->target_len[refIndex] < c.window) continue;
-      // Sum-up ref and alt counts
-      TCountVector sumCounts;
-      sumCounts.resize(snps[refIndex].size(), RACount());
-      for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
-	TCountVector::iterator itSC = sumCounts.begin();
-	for(TCountVector::const_iterator itC = fCount[file_c][refIndex].begin(); itC != fCount[file_c][refIndex].end(); ++itC, ++itSC) {
-	  itSC->watsonRef += itC->watsonRef;
-	  itSC->watsonAlt += itC->watsonAlt;
-	  itSC->crickRef += itC->crickRef;
-	  itSC->crickAlt += itC->crickAlt;
-	  itSC->falseBase += itC->falseBase;
-	}
-      }
-      
-      // Find informative het. SNPs
-      typedef std::set<std::size_t> THetSnp;
-      THetSnp hetSNP;
-      for(TCountVector::const_iterator itSC = sumCounts.begin(); itSC != sumCounts.end(); ++itSC) {
-	// Ref and alt seen (true variation) + watson and crick seen (no strand bias)?
-	if ((itSC->falseBase == 0) && ((itSC->watsonRef + itSC->crickRef) > 0) && ((itSC->watsonAlt + itSC->crickAlt) > 0) && ((itSC->watsonRef + itSC->watsonAlt) > 0) && ((itSC->crickRef + itSC->crickAlt) > 0)) hetSNP.insert((std::size_t) (itSC - sumCounts.begin()));
-      }
-
-      // Build Haplotypes for wcWindows
-      std::vector<uint32_t> support;
-      support.resize(c.files.size(), 0);
-      typedef std::vector<bool> TFlipVector;
-      typedef std::vector<TFlipVector> TFlipMatrix;
-      TFlipMatrix fm;
-      fm.resize(c.files.size(), TFlipVector());
-      for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) fm[file_c].resize(c.files.size(), false);
-      for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
-	if (wcWindows[file_c][refIndex].empty()) continue;
-	for(unsigned int file_d = file_c + 1; file_d < c.files.size(); ++file_d) {
-	  if (wcWindows[file_d][refIndex].empty()) continue;
-	  uint32_t diffCount = 0;
-	  uint32_t agreeCount = 0;
-	  // Iterate informative SNPs
-	  for(THetSnp::const_iterator itHS = hetSNP.begin(); itHS != hetSNP.end(); ++itHS) {
-	    uint32_t curBin = snps[refIndex][*itHS].pos / c.window;
-	    if ((fWR[file_c][refIndex][curBin] == -1) || (fWR[file_d][refIndex][curBin] == -1)) continue; // Blacklisted bin
-	    if ((wcWindows[file_c][refIndex].find(curBin) != wcWindows[file_c][refIndex].end()) && (wcWindows[file_d][refIndex].find(curBin) != wcWindows[file_d][refIndex].end())) {
-	      bool cWAllele = false;
-	      bool watsonSuccess = _getWatsonAllele(fCount[file_c][refIndex][*itHS], cWAllele);
-	      bool cCAllele = false;
-	      bool crickSuccess = _getCrickAllele(fCount[file_c][refIndex][*itHS], cCAllele);
-	      // At least one allele must be called
-	      if ((watsonSuccess) && (!crickSuccess)) cCAllele = !cWAllele;
-	      else if ((!watsonSuccess) && (crickSuccess)) cWAllele = !cCAllele;
-	      else if ((!watsonSuccess) && (!crickSuccess)) continue;  // Not covered
-	      else if (cWAllele == cCAllele) continue; // Incorrect genotyping
-	      bool dWAllele = false;
-	      watsonSuccess = _getWatsonAllele(fCount[file_d][refIndex][*itHS], dWAllele);
-	      bool dCAllele = false;
-	      crickSuccess = _getCrickAllele(fCount[file_d][refIndex][*itHS], dCAllele);
-	      // At least one allele must be called
-	      if ((watsonSuccess) && (!crickSuccess)) dCAllele = !dWAllele;
-	      else if ((!watsonSuccess) && (crickSuccess)) dWAllele = !dCAllele;
-	      else if ((!watsonSuccess) && (!crickSuccess)) continue;  // Not covered
-	      else if (dWAllele == dCAllele) continue; // Incorrect genotyping
-
-	      // Same haplotype?
-	      if (cWAllele == dWAllele) ++agreeCount;
-	      else ++diffCount;
-
-	      // Debug code
-	      //std::cerr << file_c << ',' << refIndex << ',' << snps[refIndex][*itHS].pos << ',' <<  snps[refIndex][*itHS].ref << ',' <<  snps[refIndex][*itHS].alt << ',' << fCount[file_c][refIndex][*itHS].watsonRef << ',' << fCount[file_c][refIndex][*itHS].watsonAlt << ',' << fCount[file_c][refIndex][*itHS].crickRef << ',' << fCount[file_c][refIndex][*itHS].crickAlt << ',' << std::endl;
-	      //std::cerr << file_d << ',' << refIndex << ',' << snps[refIndex][*itHS].pos << ',' <<  snps[refIndex][*itHS].ref << ',' <<  snps[refIndex][*itHS].alt << ',' << fCount[file_d][refIndex][*itHS].watsonRef << ',' << fCount[file_d][refIndex][*itHS].watsonAlt << ',' << fCount[file_d][refIndex][*itHS].crickRef << ',' << fCount[file_d][refIndex][*itHS].crickAlt << ',' << std::endl;
-	    }
-	  }
-	  if (diffCount>agreeCount) {
-	    support[file_c] += diffCount;
-	    support[file_d] += diffCount;
-	    fm[file_c][file_d] = true;
-	    fm[file_d][file_c] = true;
-	  } else {
-	    support[file_c] += agreeCount;
-	    support[file_d] += agreeCount;
-	  }
-	}
-      }
-      // Find best covered sample (most informative het. SNPs)
-      uint32_t bestSupport = 0;
-      uint32_t bestIndex = 0;
-      for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
-	if (support[file_c] > bestSupport) {
-	  bestSupport = support[file_c];
-	  bestIndex = file_c;
-	}
-      }
-      if (bestSupport > 0) {
-	for(unsigned int file_d = 0; file_d < c.files.size(); ++file_d) {
-	  if (file_d == bestIndex) continue; // No flip required
-	  if (fm[bestIndex][file_d]) {
-	    // Flip required
-	    if (wcWindows[file_d][refIndex].empty()) continue;
-	    uint32_t bins = hdr->target_len[refIndex] / c.window + 1;
-	    for(uint32_t bin = 0; bin < bins; ++bin) {
-	      if (wcWindows[file_d][refIndex].find(bin) != wcWindows[file_d][refIndex].end()) {
-		wcFlipWindows[file_d][refIndex].insert(bin);
-		wcWindows[file_d][refIndex].erase(bin);
-	      }
-	    }
-	  }
-	}
-      }
-    }
-  }
+  if (c.hasVariationFile) _processVariationData(c, hdr, snps, fCount, fWR, wcWindows, wcFlipWindows);
   
-
   // Write bam files
   now = boost::posix_time::second_clock::local_time();
   std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "BAM writing" << std::endl;
@@ -766,12 +411,24 @@ int main(int argc, char **argv) {
     sam_close(samfile[file_c]);
   }
 
+  // End
+  now = boost::posix_time::second_clock::local_time();
+  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Done." << std::endl;
+
+  // Output statistics
+  std::cout << "Threshold statistics: Crick cut=" << crickCut << ", Median Crick fraction=" << criMedianFrac << ", MAD=" << criMedianMAD << std::endl;
+  std::cout << "Threshold statistics: Watson cut=" << watsonCut << ", Median Watson fraction=" << watMedianFrac << ", MAD=" << watMedianMAD << std::endl;
+  std::cout << "Coverage statistics: #HighCoverageWindows=" << numhighcov << ", #LowCoverageWindows=" << numlowcov << std::endl;
+  std::cout << "Bin statistics: #Whitelist=" << numwhitelist << ", #Blacklist=" << numblacklist << std::endl;
+  std::cout << "Watson-Watson: Range=[" << watsonBound << ",1], #WatsonWindows=" << wWindowCount << std::endl;
+  std::cout << "Crick-Crick: Range=[0," << crickBound << "], #CrickWindows=" << cWindowCount << std::endl;
+  std::cout << "Watson-Crick: Range=[" << lWCBound << "," << uWCBound << "], #WatsonCrickWindows=" << wcWindowCount << std::endl;
+
+
 #ifdef PROFILE
   ProfilerStop();
 #endif
 
-  // End
-  now = boost::posix_time::second_clock::local_time();
-  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Done." << std::endl;
+
   return 0;
 }
