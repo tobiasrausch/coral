@@ -389,8 +389,18 @@ int main(int argc, char **argv) {
 	  rec->core.flag ^= BAM_FMREVERSE;
 	  sam_write1(wwbam, hdr, rec);
 	} 
-	else if (wcWindows[file_c][refIndex].find(bin) != wcWindows[file_c][refIndex].end()) sam_write1(wcbam, hdr, rec);
+	else if (wcWindows[file_c][refIndex].find(bin) != wcWindows[file_c][refIndex].end()) {
+	  std::string ps(boost::lexical_cast<std::string>(refIndex));
+	  bam_aux_append(rec, "PS", 'Z', ps.length() + 1, (uint8_t*) ps.c_str());
+	  int32_t hp = 1;
+	  bam_aux_append(rec, "HP", 'i', 4, (uint8_t*)&hp);
+	  sam_write1(wcbam, hdr, rec);
+	}
 	else if (wcFlipWindows[file_c][refIndex].find(bin) != wcFlipWindows[file_c][refIndex].end()) {
+	  std::string ps(boost::lexical_cast<std::string>(refIndex));
+	  bam_aux_append(rec, "PS", 'Z', ps.length() + 1, (uint8_t*) ps.c_str());
+	  int32_t hp = 2;
+	  bam_aux_append(rec, "HP", 'i', 4, (uint8_t*)&hp);
 	  rec->core.flag ^= BAM_FREVERSE;
 	  rec->core.flag ^= BAM_FMREVERSE;
 	  sam_write1(wcbam, hdr, rec);
