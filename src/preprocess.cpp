@@ -53,6 +53,7 @@ struct Config {
   boost::filesystem::path ww;
   boost::filesystem::path wc;
   boost::filesystem::path variation;
+  boost::filesystem::path outvcf;
   std::vector<boost::filesystem::path> files;
 };
 
@@ -74,6 +75,7 @@ int main(int argc, char **argv) {
     ("samestrand,s", boost::program_options::value<boost::filesystem::path>(&c.ww)->default_value("ww.bam"), "output same strand bam")
     ("diffstrand,d", boost::program_options::value<boost::filesystem::path>(&c.wc)->default_value("wc.bam"), "output different strand bam")
     ("variation,v", boost::program_options::value<boost::filesystem::path>(&c.variation), "SNP VCF file to unify WC data (optional)")
+    ("outvcf,o", boost::program_options::value<boost::filesystem::path>(&c.outvcf)->default_value("snp.phased.vcf.gz"), "phased SNP VCF file (optional)")
     ;
 
   boost::program_options::options_description hidden("Hidden options");
@@ -392,17 +394,31 @@ int main(int argc, char **argv) {
 	else if (wcWindows[file_c][refIndex].find(bin) != wcWindows[file_c][refIndex].end()) {
 	  std::string ps(boost::lexical_cast<std::string>(refIndex));
 	  bam_aux_append(rec, "PS", 'Z', ps.length() + 1, (uint8_t*) ps.c_str());
-	  int32_t hp = 1;
+	  int32_t hp = 0;
+	  if (rec->core.flag & BAM_FREAD1) {
+	    if (rec->core.flag & BAM_FREVERSE) hp = 2;
+	    else hp = 1;
+	  } else {
+	    if (rec->core.flag & BAM_FREVERSE) hp = 1;
+	    else hp = 2;
+	  }
 	  bam_aux_append(rec, "HP", 'i', 4, (uint8_t*)&hp);
 	  sam_write1(wcbam, hdr, rec);
 	}
 	else if (wcFlipWindows[file_c][refIndex].find(bin) != wcFlipWindows[file_c][refIndex].end()) {
 	  std::string ps(boost::lexical_cast<std::string>(refIndex));
 	  bam_aux_append(rec, "PS", 'Z', ps.length() + 1, (uint8_t*) ps.c_str());
-	  int32_t hp = 2;
-	  bam_aux_append(rec, "HP", 'i', 4, (uint8_t*)&hp);
 	  rec->core.flag ^= BAM_FREVERSE;
 	  rec->core.flag ^= BAM_FMREVERSE;
+	  int32_t hp = 0;
+	  if (rec->core.flag & BAM_FREAD1) {
+	    if (rec->core.flag & BAM_FREVERSE) hp = 2;
+	    else hp = 1;
+	  } else {
+	    if (rec->core.flag & BAM_FREVERSE) hp = 1;
+	    else hp = 2;
+	  }
+	  bam_aux_append(rec, "HP", 'i', 4, (uint8_t*)&hp);
 	  sam_write1(wcbam, hdr, rec);
 	}
       }
@@ -413,13 +429,15 @@ int main(int argc, char **argv) {
   sam_close(wcbam);
   sam_close(wwbam);
 
-
   // Close bam
   bam_hdr_destroy(hdr);
   for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
     hts_idx_destroy(idx[file_c]);
     sam_close(samfile[file_c]);
   }
+
+  // Write phased VCF
+  if (c.hasVariationFile) outputVCF(c, snps, fCount);
 
   // End
   now = boost::posix_time::second_clock::local_time();
