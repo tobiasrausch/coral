@@ -199,10 +199,11 @@ namespace streq
 
 
   inline std::string
-  _parseBamHeader(char* hdtxt) {
+  _parseBamHeader(bam_hdr_t const* hdr) {
     typedef boost::tokenizer< boost::char_separator<char> > Tokenizer;
     boost::char_separator<char> sep("\n");
-    Tokenizer tokens(std::string(hdtxt), sep);
+    std::string header(hdr->text, 0, hdr->l_text);
+    Tokenizer tokens(header, sep);
     for(Tokenizer::iterator tokIter = tokens.begin(); tokIter!=tokens.end(); ++tokIter) {
       if ((tokIter->at(0) == '@') && (tokIter->at(1) == 'R') && (tokIter->at(2) == 'G')) {
 	boost::char_separator<char> sp("\t");
@@ -227,7 +228,7 @@ namespace streq
     // Open wc bam file (not sorted and no index yet!!!)
     samFile* samfile = sam_open(c.wc.string().c_str(), "r");
     bam_hdr_t* bamhd = sam_hdr_read(samfile);
-    std::string smtag(_parseBamHeader(bamhd->text));
+    std::string smtag(_parseBamHeader(bamhd));
 
     // Info
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
