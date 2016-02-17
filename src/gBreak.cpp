@@ -88,7 +88,7 @@ int main(int argc, char **argv) {
   generic.add_options()
     ("help,?", "show help message")
     ("map-qual,q", boost::program_options::value<unsigned short>(&c.minMapQual)->default_value(1), "min. mapping quality")
-    ("readcount,r", boost::program_options::value<uint16_t>(&c.readcount)->default_value(100), "window length in terms of #reads (<65000)")
+    ("readcount,r", boost::program_options::value<uint16_t>(&c.readcount)->default_value(250), "window length in terms of #reads (<65000)")
     ("diffstrand,d", boost::program_options::value<boost::filesystem::path>(&c.wc), "different strand bam (wc.bam)")
     ("outvcf,o", boost::program_options::value<boost::filesystem::path>(&c.outvcf)->default_value("variants.vcf.gz"), "output variants file")
     ;
@@ -180,10 +180,11 @@ int main(int argc, char **argv) {
   // Parse bam (contig by contig)
   now = boost::posix_time::second_clock::local_time();
   std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Call Breakpoints" << std::endl;
-  boost::progress_display show_progress( hdr->n_targets );
-  //for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
-  for (int refIndex = 0; refIndex<1; ++refIndex) {
-    ++show_progress;
+  uint32_t genomesize = 0;
+  for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) genomesize += hdr->target_len[refIndex];
+  boost::progress_display show_progress( genomesize );
+  for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
+    show_progress += hdr->target_len[refIndex];
     // Breakpoint support
     std::vector<int32_t> midPos;
     typedef uint16_t TPeakHeight;
@@ -350,6 +351,22 @@ int main(int argc, char **argv) {
 	    if ((gts[0] == bcf_gt_unphased(0)) && (gts[1] == bcf_gt_unphased(1))) gtWW = 1;
 	    else if ((gts[0] == bcf_gt_unphased(1)) && (gts[1] == bcf_gt_unphased(1))) gtWW = 2;
 	    if ((gtWW) && (((gtWW == 1) && (gtWC != 1)) || ((gtWW == 2) && (gtWC==1)))) {
+	      if (gtWW == 0) {
+		gts[0] = bcf_gt_phased(0);
+		gts[1] = bcf_gt_phased(0);
+	      } else if (gtWW == 2) {
+		gts[0] = bcf_gt_phased(1);
+		gts[1] = bcf_gt_phased(1);
+	      } else {
+		if (gtWC == 0) {
+		  // Watson-Watson  (inversion is on crick -> HP=2)
+		  gts[0] = bcf_gt_phased(0);
+		  gts[1] = bcf_gt_phased(1);
+		} else {
+		  gts[0] = bcf_gt_phased(1);
+		  gts[1] = bcf_gt_phased(0);
+		}
+	      }
 	      rout->rid = bcf_hdr_name2id(hdr_out, hdr->target_name[refIndex]);
 	      rout->pos = midPos[itSegPrev->second];
 	      rout->qual = gqval[0];
