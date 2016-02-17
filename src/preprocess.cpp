@@ -70,7 +70,7 @@ int main(int argc, char **argv) {
   boost::program_options::options_description generic("Generic options");
   generic.add_options()
     ("help,?", "show help message")
-    ("map-qual,q", boost::program_options::value<unsigned short>(&c.minMapQual)->default_value(10), "min. mapping quality")
+    ("map-qual,q", boost::program_options::value<unsigned short>(&c.minMapQual)->default_value(1), "min. mapping quality")
     ("window,w", boost::program_options::value<uint32_t>(&c.window)->default_value(1000000), "window length")
     ("samestrand,s", boost::program_options::value<boost::filesystem::path>(&c.ww)->default_value("ww.bam"), "output same strand bam")
     ("diffstrand,d", boost::program_options::value<boost::filesystem::path>(&c.wc)->default_value("wc.bam"), "output different strand bam")

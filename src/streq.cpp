@@ -37,7 +37,7 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include <boost/progress.hpp>
 #include <htslib/sam.h>
 
-#include "util.h"
+#include "strandutil.h"
 
 using namespace streq;
 
