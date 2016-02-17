@@ -2,6 +2,8 @@
 .boost
 src/streq
 src/preprocess
+src/gBreak
+
 
 # Compiled Object files
 *.slo
