@@ -19,3 +19,10 @@ The pre-processing method categorizes Watson-Watson, Crick-Crick and Watson-Cric
 
 `samtools sort HG00512.wc.bam HG00512.wc.sort && samtools index HG00512.wc.sort.bam`
 
+
+Plotting a list of regions
+--------------------------
+
+`./src/streq -s HG00512.ww.bam -d HG00512.wc.bam -a INV.out INV.bed`
+
+`Rscript ./R/streq.R INV.out`

@@ -97,7 +97,7 @@ _countSegments(bam_hdr_t* hdr, samFile* wwfile, hts_idx_t* wwidx, TConfig const&
       int32_t regionStart = bin * c.segment + iStart;
       int32_t regionEnd = std::min((uint32_t) ((bin + 1) * c.segment + iStart), iEnd);
       bool insideInterval = true;
-      if ((regionEnd < itR->first.first) || (regionStart > itR->first.second)) insideInterval = false;
+      if ((regionEnd <= itR->first.first) || (regionStart >= itR->first.second)) insideInterval = false;
       ofile << hdr->target_name[refIndex] << '\t' << regionStart << '\t' << regionEnd << '\t' << wRatio << '\t' << sup << "\t" << insideInterval << "\t" << id << "\t" << intervalName << std::endl;
     }
   }
