@@ -41,7 +41,7 @@ struct BoLog {
 
 
  template<typename TMapqVector>
- inline void
+ inline int32_t
  _genotype(TMapqVector const& mapqRef, TMapqVector const& mapqAlt, float* gls, int32_t* gqval, int32_t* gts) {
    typedef double FLP;
    FLP gl[3];
@@ -82,6 +82,7 @@ struct BoLog {
    pl[0] = (uint32_t) boost::math::round(-10 * gl[0]);
    pl[1] = (uint32_t) boost::math::round(-10 * gl[1]);
    pl[2] = (uint32_t) boost::math::round(-10 * gl[2]);
+   int32_t gttype = -1;
    if ((peDepth) && (pl[0] + pl[1] + pl[2] > 0)) {
      FLP likelihood = (FLP) std::log10((1-1/(bl.phred2prob[pl[0]]+bl.phred2prob[pl[1]]+bl.phred2prob[pl[2]])));
      likelihood = (likelihood > SMALLEST_GL) ? likelihood : SMALLEST_GL;
@@ -89,12 +90,15 @@ struct BoLog {
      if (glBest==0) {
        gts[0] = bcf_gt_unphased(1);
        gts[1] = bcf_gt_unphased(1);
+       gttype = 2;
      } else if (glBest==1) {
        gts[0] = bcf_gt_unphased(0);
        gts[1] = bcf_gt_unphased(1);
+       gttype = 1;
      } else {
        gts[0] = bcf_gt_unphased(0);
        gts[1] = bcf_gt_unphased(0);
+       gttype = 0;
      }
    } else {
      gts[0] = bcf_gt_missing;
@@ -104,6 +108,7 @@ struct BoLog {
    gls[2] = (float) gl[0];
    gls[1] = (float) gl[1];
    gls[0] = (float) gl[2];
+   return gttype;
  }
  
 

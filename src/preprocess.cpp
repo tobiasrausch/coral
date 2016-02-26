@@ -28,6 +28,8 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include <fstream>
 
 #define BOOST_DISABLE_ASSERTS
+#include <boost/math/distributions/chi_squared.hpp>
+#include <boost/math/distributions/hypergeometric.hpp>
 #include <boost/program_options/cmdline.hpp>
 #include <boost/program_options/options_description.hpp>
 #include <boost/program_options/parsers.hpp>
@@ -57,6 +59,16 @@ struct Config {
   std::vector<boost::filesystem::path> files;
 };
 
+
+struct WindowClassifier {
+  float watsonCut;
+  float crickCut;
+  float median;
+  float mad;
+  
+  WindowClassifier(): watsonCut(0), crickCut(0), median(0), mad(0) {}
+  WindowClassifier(float w, float c, float m, float a) : watsonCut(w), crickCut(c), median(m), mad(a) {}
+};
 
 int main(int argc, char **argv) {
 
@@ -217,85 +229,74 @@ int main(int argc, char **argv) {
 	  wRatio.push_back(((float) *itWatson / (float) (sup)));
 	} else fWR[file_c][refIndex][bin] = -1;
       }
+
+      // Debug
+      //for(std::size_t bin = 0; bin < bins; ++bin) std::cerr << file_c << '\t' << refIndex << '\t' << fWR[file_c][refIndex][bin] << std::endl;
     }
   }
 
-  // Get global optimal watson and crick threshold
-  float crickCut = 0;
-  float watsonCut = 0;
-  boost::tie(crickCut, watsonCut) = _biModalMinima(wRatio);
-  wRatio.clear();
 
-  // Black-listing variation/repeat/outlier bins across cells
-  std::vector<float> watfraction;
-  std::vector<float> crifraction;
-  for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
-    if (hdr->target_len[refIndex] < c.window) continue;
-    uint32_t bins = hdr->target_len[refIndex] / c.window + 1;
-    for(std::size_t bin = 0; bin < bins; ++bin) {
-      uint32_t totalCells = 0;
-      float crickFraction = 0;
-      float watsonFraction = 0;
-      for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
-	if (fWR[file_c][refIndex][bin] != -1) {
-	  ++totalCells;
-	  if (fWR[file_c][refIndex][bin] < crickCut) ++crickFraction;
-	  else if (fWR[file_c][refIndex][bin] > watsonCut) ++watsonFraction;
-	}
-      }
-      if (totalCells > (c.files.size() / 2)) {
-	crickFraction /= (float) totalCells;
-	watsonFraction /= (float) totalCells;
-	crifraction.push_back(crickFraction);
-	watfraction.push_back(watsonFraction);
-      }
-    }
-  }
-  float watMedianFrac = 0;
-  float watMedianMAD = 0;
-  float criMedianFrac = 0;
-  float criMedianMAD = 0;
-  boost::tie(watMedianFrac, watMedianMAD) = _getWWStrandBounds(watfraction);
-  boost::tie(criMedianFrac, criMedianMAD) = _getWWStrandBounds(crifraction);
-  float lowerWatFracBound = watMedianFrac - 3 * watMedianMAD;
-  float upperWatFracBound = watMedianFrac + 3 * watMedianMAD;
-  float lowerCriFracBound = criMedianFrac - 3 * criMedianMAD;
-  float upperCriFracBound = criMedianFrac + 3 * criMedianMAD;
-  watfraction.clear();
-  crifraction.clear();
-
-  // Black-list bins
+  // Black-listing variation/repeat/outlier bins across cells using 1:2:1 or 25% WatsonWatson, 50% WatsonCrick, 25% CrickCrick
+  bool blacklist = true;
   unsigned int numwhitelist=0;
   unsigned int numblacklist=0;  
   unsigned int numhighcov=0;
   unsigned int numlowcov=0;  
-  for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
-    if (hdr->target_len[refIndex] < c.window) continue;
-    uint32_t bins = hdr->target_len[refIndex] / c.window + 1;
-    for(std::size_t bin = 0; bin < bins; ++bin) {
-      bool validBin = true;
-      uint32_t totalCells = 0;
-      float crickFraction = 0;
-      float watsonFraction = 0;
-      for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
-	if (fWR[file_c][refIndex][bin] != -1) {
-	  ++totalCells;
-	  if (fWR[file_c][refIndex][bin] < crickCut) ++crickFraction;
-	  else if (fWR[file_c][refIndex][bin] > watsonCut) ++watsonFraction;
-	  ++numhighcov;
-	} else ++numlowcov;
+  typedef std::vector<WindowClassifier> TChrThresholds;
+  TChrThresholds cThres(hdr->n_targets, WindowClassifier());
+  if (blacklist) {
+    // Get global optimal watson and crick threshold
+    float crickCut = 0;
+    float watsonCut = 0;
+    boost::tie(crickCut, watsonCut) = _biModalMinima(wRatio);
+    wRatio.clear();
+    
+    for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
+      if (hdr->target_len[refIndex] < c.window) continue;
+      uint32_t bins = hdr->target_len[refIndex] / c.window + 1;
+      TWRatioVector chrWRatio;
+
+      for(std::size_t bin = 0; bin < bins; ++bin) {
+	uint32_t totalCells = 0;
+	float crickFraction = 0;
+	float watsonFraction = 0;
+	for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
+	  if (fWR[file_c][refIndex][bin] != -1) {
+	    ++totalCells;
+	    if (fWR[file_c][refIndex][bin] < crickCut) ++crickFraction;
+	    else if (fWR[file_c][refIndex][bin] > watsonCut) ++watsonFraction;
+	    ++numhighcov;
+	  } else ++numlowcov;
+	}
+	if (totalCells > (c.files.size() / 2)) {
+	  double pvalWW = 0;
+	  _fisher((int) crickFraction, (int) watsonFraction, (int) (0.25 * totalCells), (int) (0.25 * totalCells), pvalWW);
+	  double pvalWC = 0;
+	  uint32_t wcFraction = totalCells - crickFraction - watsonFraction;
+	  _fisher((int) crickFraction, (int) wcFraction, (int) (0.25 * totalCells), (int) (0.5 * totalCells), pvalWC);
+	  double pvalCW = 0;
+	  _fisher((int) watsonFraction, (int) wcFraction, (int) (0.25 * totalCells), (int) (0.5 * totalCells), pvalCW);
+	  double pThreshold = 0.01;
+	  if ((pvalWW < pThreshold) || (pvalWC < pThreshold) || (pvalCW < pThreshold)) {
+	    ++numblacklist;
+	    for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) fWR[file_c][refIndex][bin] = -1;
+	  } else {
+	    ++numwhitelist;
+	    for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) 
+	      if (fWR[file_c][refIndex][bin] != -1) chrWRatio.push_back(fWR[file_c][refIndex][bin]);
+	  }
+	}
       }
-      if (totalCells > (c.files.size() / 2)) {
-	crickFraction /= (float) totalCells;
-	watsonFraction /= (float) totalCells;
-	if ((crickFraction < lowerCriFracBound) || (watsonFraction < lowerWatFracBound) || (crickFraction > upperCriFracBound) || (watsonFraction > upperWatFracBound)) validBin = false;
-      } else validBin = false;
-      if (!validBin) {
-	++numblacklist;
-	for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) fWR[file_c][refIndex][bin] = -1;
-      }	else ++numwhitelist;
+
+      // Estimate chromosome cutoffs
+      if (!chrWRatio.empty()) boost::tie(cThres[refIndex].crickCut, cThres[refIndex].watsonCut) = _biModalMinima(chrWRatio);
+      TWRatioVector wc_wRatio;
+      for(TWRatioVector::const_iterator itWC = chrWRatio.begin(); itWC != chrWRatio.end(); ++itWC) 
+	if ((*itWC > cThres[refIndex].crickCut) && (*itWC < cThres[refIndex].watsonCut)) wc_wRatio.push_back(*itWC);
+      if (wc_wRatio.size()>2) boost::tie(cThres[refIndex].median, cThres[refIndex].mad) = _getMedianMAD(wc_wRatio);
     }
   }
+
 
   // Categorize chromosomes based on white-listed bins
   typedef uint32_t TPos;
@@ -315,13 +316,14 @@ int main(int argc, char **argv) {
   uint32_t wWindowCount = 0;
   uint32_t cWindowCount = 0;
   uint32_t wcWindowCount = 0;
-  float watsonBound = std::min((float) 0.9, watsonCut + 3 * watMedianMAD);
-  float crickBound = std::max((float) 0.1, crickCut - 3 * criMedianMAD);
-  float lWCBound = std::min((float) 0.4, std::max(crickCut + 3 * criMedianMAD, (float) 0.25));
-  float uWCBound = std::max((float) 0.6, std::min(watsonCut - 3 * watMedianMAD, (float) 0.75));
   for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
     for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
       if (hdr->target_len[refIndex] < c.window) continue;
+      float watsonBound = std::min((float) 0.9, cThres[refIndex].watsonCut);
+      float crickBound = std::max((float) 0.1, cThres[refIndex].crickCut);
+      float lWCBound = std::min((float) 0.4, std::max(cThres[refIndex].median - 5 * cThres[refIndex].mad, crickBound));
+      float uWCBound = std::max((float) 0.6, std::min(cThres[refIndex].median + 5 * cThres[refIndex].mad, watsonBound));
+
       uint32_t bins = hdr->target_len[refIndex] / c.window + 1;
       TWRatioVector chrWRatio;
       for(std::size_t bin = 0; bin < bins; ++bin)
@@ -429,13 +431,6 @@ int main(int argc, char **argv) {
   sam_close(wcbam);
   sam_close(wwbam);
 
-  // Close bam
-  bam_hdr_destroy(hdr);
-  for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
-    hts_idx_destroy(idx[file_c]);
-    sam_close(samfile[file_c]);
-  }
-
   // Write phased VCF
   if (c.hasVariationFile) outputVCF(c, snps, fCount);
 
@@ -444,13 +439,22 @@ int main(int argc, char **argv) {
   std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Done." << std::endl;
 
   // Output statistics
-  std::cout << "Threshold statistics: Crick cut=" << crickCut << ", Median Crick fraction=" << criMedianFrac << ", MAD=" << criMedianMAD << std::endl;
-  std::cout << "Threshold statistics: Watson cut=" << watsonCut << ", Median Watson fraction=" << watMedianFrac << ", MAD=" << watMedianMAD << std::endl;
+  for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
+    if (hdr->target_len[refIndex] < c.window) continue;
+    std::cout << "Threshold statistics " << hdr->target_name[refIndex] << ": Crick cut=" << cThres[refIndex].crickCut << ", Watson cut=" << cThres[refIndex].watsonCut << ", Median=" << cThres[refIndex].median << ", MAD=" << cThres[refIndex].mad << std::endl;
+  }
   std::cout << "Coverage statistics: #HighCoverageWindows=" << numhighcov << ", #LowCoverageWindows=" << numlowcov << std::endl;
   std::cout << "Bin statistics: #Whitelist=" << numwhitelist << ", #Blacklist=" << numblacklist << std::endl;
-  std::cout << "Watson-Watson: Range=[" << watsonBound << ",1], #WatsonWindows=" << wWindowCount << std::endl;
-  std::cout << "Crick-Crick: Range=[0," << crickBound << "], #CrickWindows=" << cWindowCount << std::endl;
-  std::cout << "Watson-Crick: Range=[" << lWCBound << "," << uWCBound << "], #WatsonCrickWindows=" << wcWindowCount << std::endl;
+  std::cout << "#WatsonWindows=" << wWindowCount << std::endl;
+  std::cout << "#CrickWindows=" << cWindowCount << std::endl;
+  std::cout << "#WatsonCrickWindows=" << wcWindowCount << std::endl;
+
+  // Close bam
+  bam_hdr_destroy(hdr);
+  for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
+    hts_idx_destroy(idx[file_c]);
+    sam_close(samfile[file_c]);
+  }
 
 
 #ifdef PROFILE

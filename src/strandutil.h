@@ -70,6 +70,26 @@ namespace streq
 
   template<typename TWRatioVector>
   inline std::pair<float, float>
+  _biModalSynchronizedMinima(TWRatioVector& wRatio) {
+    std::sort(wRatio.begin(), wRatio.end());
+    uint32_t binCount = (std::pow(wRatio.size(), 0.1/0.3) * (wRatio[wRatio.size()-1] - wRatio[0])) / (wRatio[(int) (3*wRatio.size()/4)] - wRatio[(int) (wRatio.size()/4)]);
+    std::vector<uint32_t> histogram(binCount + 1, 0);
+    for(typename TWRatioVector::iterator itW = wRatio.begin(); itW != wRatio.end(); ++itW) ++histogram[(uint32_t)((*itW)*binCount)];
+    uint32_t smallestBinVal = histogram[0] + histogram[binCount];
+    float crickCut = 0;
+    float watsonCut = 1;
+    for(std::size_t i = 0; i<binCount/2; ++i) {
+      if (histogram[i] + histogram[binCount - i] < smallestBinVal) {
+	smallestBinVal = histogram[i] + histogram[binCount - i];
+	crickCut = (float) i / (float) binCount;
+	watsonCut = (float) (binCount - i) / (float) binCount;
+      }
+    }
+    return std::make_pair(crickCut, watsonCut);
+  }
+
+  template<typename TWRatioVector>
+  inline std::pair<float, float>
   _biModalMinima(TWRatioVector& wRatio) {
     std::sort(wRatio.begin(), wRatio.end());
     uint32_t binCount = (std::pow(wRatio.size(), 0.1/0.3) * (wRatio[wRatio.size()-1] - wRatio[0])) / (wRatio[(int) (3*wRatio.size()/4)] - wRatio[(int) (wRatio.size()/4)]);
@@ -87,21 +107,39 @@ namespace streq
     float watsonCut = 1;
     for(std::size_t i = binCount; i>binCount/2; --i) {
       if (histogram[i] < smallestBinVal) {
-	smallestBinVal = histogram[i];
-	watsonCut = (float) i / (float) binCount;
+        smallestBinVal = histogram[i];
+        watsonCut = (float) i / (float) binCount;
       }
     }
     return std::make_pair(crickCut, watsonCut);
   }
 
-  template<typename TFractionVector>
+
+  template<typename TCount, typename TPrecision>
+  inline void
+  _fisher(TCount const a, TCount const b, TCount const c, TCount const d, TPrecision& pval) {
+    TCount N = a + b + c + d;
+    TCount r = a + c;
+    TCount s = c + d;
+    TCount max_for_k = std::min(r, s);
+    TCount min_for_k = (TCount) std::max(0, int(r + s - N));
+    boost::math::hypergeometric_distribution<> hgd(r, s, N);
+    TPrecision cutoff = pdf(hgd, c);
+    pval = 0.0;
+    for(int k = min_for_k; k <= max_for_k; ++k) {
+      TPrecision p = pdf(hgd, k);
+      if (p <= cutoff) pval += p;
+    }
+  }
+
+  template<typename TVector>
   inline std::pair<float, float>
-  _getWWStrandBounds(TFractionVector& watfraction) {
-    float watmedian = 0;
-    _getMedian(watfraction.begin(), watfraction.end(), watmedian);
-    float watmad = 0;
-    _getMAD(watfraction.begin(), watfraction.end(), watmedian, watmad);
-    return std::make_pair(watmedian, watmad);
+  _getMedianMAD(TVector& vec) {
+    float median = 0;
+    _getMedian(vec.begin(), vec.end(), median);
+    float mad = 0;
+    _getMAD(vec.begin(), vec.end(), median, mad);
+    return std::make_pair(median, mad);
   }
 
 }
