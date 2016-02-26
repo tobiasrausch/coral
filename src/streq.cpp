@@ -44,6 +44,7 @@ using namespace streq;
 struct Config {
   unsigned short minMapQual;
   uint32_t segment;
+  uint32_t margin;
   boost::filesystem::path watsonRatio;
   boost::filesystem::path ww;
   boost::filesystem::path wc;
@@ -55,7 +56,9 @@ template<typename TConfig, typename TRefIndex, typename TIntervalIter, typename 
 inline void
 _countSegments(bam_hdr_t* hdr, samFile* wwfile, hts_idx_t* wwidx, TConfig const& c, TRefIndex const refIndex, TIntervalIter const& itR, std::string const& id, TOutfile& ofile) {
   std::string intervalName = itR->second;
-  uint32_t intervalSize = itR->first.second - itR->first.first;
+  uint32_t iStart = std::max(0, (int) itR->first.first - (int) (c.margin * c.segment));
+  uint32_t iEnd = std::min(itR->first.second + (int) (c.margin * c.segment), hdr->target_len[refIndex]);
+  uint32_t intervalSize = iEnd - iStart;
   uint32_t bins = intervalSize / c.segment + 1;
 
   typedef std::vector<uint32_t> TCounter;
@@ -64,15 +67,16 @@ _countSegments(bam_hdr_t* hdr, samFile* wwfile, hts_idx_t* wwidx, TConfig const&
   watsonCount.resize(bins, 0);
   crickCount.resize(bins, 0);
 
-  hts_itr_t* iter = sam_itr_queryi(wwidx, refIndex, itR->first.first, itR->first.second);
+
+  hts_itr_t* iter = sam_itr_queryi(wwidx, refIndex, iStart, iEnd);
   bam1_t* rec = bam_init1();
   while (sam_itr_next(wwfile, iter, rec) >= 0) {
     if (rec->core.flag & (BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FSUPPLEMENTARY | BAM_FUNMAP)) continue;
     if ((rec->core.qual < c.minMapQual) || (rec->core.tid<0)) continue;
 	  
     int32_t pos = rec->core.pos + halfAlignmentLength(rec);
-    if ((pos >= (int32_t) itR->first.first) && (pos < (int32_t) itR->first.second)) {
-      uint32_t binInd = (uint32_t) ((pos - itR->first.first) / c.segment);
+    if ((pos >= (int32_t) iStart) && (pos < (int32_t) iEnd)) {
+      uint32_t binInd = (uint32_t) ((pos - iStart) / c.segment);
       if (rec->core.flag & BAM_FREAD1) 
 	if (rec->core.flag & BAM_FREVERSE) ++crickCount[binInd];
 	else ++watsonCount[binInd];
@@ -90,9 +94,11 @@ _countSegments(bam_hdr_t* hdr, samFile* wwfile, hts_idx_t* wwidx, TConfig const&
     uint32_t sup = *itWatson + *itCrick;
     if (sup > 0) {
       double wRatio = ((double) *itWatson / (double) (sup));
-      int32_t regionStart = bin * c.segment + itR->first.first;
-      int32_t regionEnd = std::min((uint32_t) ((bin + 1) * c.segment + itR->first.first), itR->first.second);
-      ofile << hdr->target_name[refIndex] << '\t' << regionStart << '\t' << regionEnd << '\t' << wRatio << '\t' << sup << "\t" << id << "\t" << intervalName << std::endl;
+      int32_t regionStart = bin * c.segment + iStart;
+      int32_t regionEnd = std::min((uint32_t) ((bin + 1) * c.segment + iStart), iEnd);
+      bool insideInterval = true;
+      if ((regionEnd < itR->first.first) || (regionStart > itR->first.second)) insideInterval = false;
+      ofile << hdr->target_name[refIndex] << '\t' << regionStart << '\t' << regionEnd << '\t' << wRatio << '\t' << sup << "\t" << insideInterval << "\t" << id << "\t" << intervalName << std::endl;
     }
   }
 }
@@ -107,6 +113,7 @@ int main(int argc, char **argv) {
     ("help,?", "show help message")
     ("map-qual,q", boost::program_options::value<unsigned short>(&c.minMapQual)->default_value(1), "min. mapping quality")
     ("segment,e", boost::program_options::value<uint32_t>(&c.segment)->default_value(5000), "segment size")
+    ("margin,m", boost::program_options::value<uint32_t>(&c.margin)->default_value(20), "margin (in #segments)")
     ("samestrand,s", boost::program_options::value<boost::filesystem::path>(&c.ww)->default_value("ww.bam"), "input same strand bam")
     ("diffstrand,d", boost::program_options::value<boost::filesystem::path>(&c.wc)->default_value("wc.bam"), "input different strand bam")
     ("wcratio,a", boost::program_options::value<boost::filesystem::path>(&c.watsonRatio)->default_value("watson.out"), "output file for WC ratio")
@@ -166,8 +173,7 @@ int main(int argc, char **argv) {
   typedef std::pair<uint32_t, uint32_t> TInterval;
   typedef std::map<TInterval, std::string> TIntervalMap;
   typedef std::vector<TIntervalMap> TGenomicIntervals;
-  TGenomicIntervals genomicIntervals;
-  genomicIntervals.resize(hdr->n_targets);
+  TGenomicIntervals genomicIntervals(hdr->n_targets);
   std::ifstream regionFile(c.region.string().c_str(), std::ifstream::in);
   if (regionFile.is_open()) {
     while (regionFile.good()) {
@@ -193,7 +199,7 @@ int main(int argc, char **argv) {
 
   // Output WC ratios
   std::ofstream ofile(c.watsonRatio.string().c_str());
-  ofile << "chr\tstart\tend\twratio\tsupport\ttype\tid" << std::endl;
+  ofile << "chr\tstart\tend\twratio\tsupport\tinside\ttype\tid" << std::endl;
   for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
     for(TIntervalMap::const_iterator itR = genomicIntervals[refIndex].begin(); itR != genomicIntervals[refIndex].end(); ++itR) {
       _countSegments(hdr, wwfile, wwidx, c, refIndex, itR, "Watson", ofile);

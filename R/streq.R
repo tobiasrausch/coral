@@ -7,6 +7,7 @@ library(reshape2)
 args=commandArgs(trailingOnly=TRUE)
 
 x = read.table(args[1], header=TRUE)
+x$inside = factor(x$inside)
 
 txtFontSize=16
 axisFontSize=16
@@ -23,7 +24,7 @@ for (localid in ids) {
     pushViewport(viewport(layout=grid.layout(1,1)))
     subset=x[x$id==localid,]
     chrName = as.character(unique(subset$chr)[1])
-    p1=ggplot(data=subset, aes(x=start, y=wratio)) + geom_line(aes(color=type), size=0.1) + geom_point(aes(color=type, size=support))
+    p1=ggplot(data=subset, aes(x=start, y=wratio)) + geom_line(aes(color=type), size=0.1) + geom_point(aes(color=type, shape=inside, size=support))
     p1=p1 + scienceTheme + xlab(chrName) + ylab("Watson Ratio") 
     p1=p1 + scale_x_continuous(labels=comma) + ylim(0,1) + theme(axis.text.x=element_text(angle=45, hjust=1))
     print(p1, vp = viewport(layout.pos.row=1, layout.pos.col=1))

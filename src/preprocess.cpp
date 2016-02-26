@@ -28,8 +28,6 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include <fstream>
 
 #define BOOST_DISABLE_ASSERTS
-#include <boost/math/distributions/chi_squared.hpp>
-#include <boost/math/distributions/hypergeometric.hpp>
 #include <boost/program_options/cmdline.hpp>
 #include <boost/program_options/options_description.hpp>
 #include <boost/program_options/parsers.hpp>

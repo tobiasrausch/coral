@@ -24,6 +24,10 @@ Contact: Tobias Rausch (rausch@embl.de)
 #ifndef STRANDUTIL_H
 #define STRANDUTIL_H
 
+#include <boost/math/distributions/chi_squared.hpp>
+#include <boost/math/distributions/hypergeometric.hpp>
+
+
 namespace streq
 {
 
