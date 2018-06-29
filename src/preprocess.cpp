@@ -85,7 +85,7 @@ int main(int argc, char **argv) {
     ("samestrand,s", boost::program_options::value<boost::filesystem::path>(&c.ww)->default_value("ww.bam"), "output same strand bam")
     ("diffstrand,d", boost::program_options::value<boost::filesystem::path>(&c.wc)->default_value("wc.bam"), "output different strand bam")
     ("variation,v", boost::program_options::value<boost::filesystem::path>(&c.variation), "SNP VCF file to unify WC data (optional)")
-    ("outvcf,o", boost::program_options::value<boost::filesystem::path>(&c.outvcf)->default_value("snp.phased.vcf.gz"), "phased SNP VCF file (optional)")
+    ("outvcf,o", boost::program_options::value<boost::filesystem::path>(&c.outvcf)->default_value("snp.phased.bcf"), "phased SNP BCF file (optional)")
     ;
 
   boost::program_options::options_description hidden("Hidden options");

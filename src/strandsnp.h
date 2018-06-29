@@ -236,7 +236,7 @@ namespace streq
     boost::progress_display show_progress( 2*bamhd->n_targets );
 
     // Output all structural variants
-    htsFile *fp = hts_open(c.outvcf.string().c_str(), "wg");
+    htsFile *fp = hts_open(c.outvcf.string().c_str(), "wb");
     bcf_hdr_t *hdr = bcf_hdr_init("w");
     
     // Print vcf header
@@ -372,6 +372,9 @@ namespace streq
     // Close VCF file
     bcf_hdr_destroy(hdr);
     hts_close(fp);
+
+    // Build index
+    bcf_index_build(c.outvcf.string().c_str(), 14);
   }
 
 
