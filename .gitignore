@@ -2,7 +2,7 @@
 .boost
 src/streq
 src/preprocess
-
+bin/
 
 # Compiled Object files
 *.slo
