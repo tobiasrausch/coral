@@ -35,7 +35,7 @@ endif
 
 # External sources
 HTSLIBSOURCES = $(wildcard src/htslib/*.c) $(wildcard src/htslib/*.h)
-SVSOURCES = $(wildcard src/*.h) $(wildcard src/*.cpp)
+SOURCES = $(wildcard src/*.h) $(wildcard src/*.cpp)
 
 # Targets
 BUILT_PROGRAMS = src/streq src/preprocess
@@ -44,12 +44,12 @@ TARGETS = ${SUBMODULES} ${BUILT_PROGRAMS}
 all:   	$(TARGETS)
 
 .htslib: $(HTSLIBSOURCES)
-	cd src/htslib && make && make lib-static && cd ../../ && touch .htslib
+	if [ -r src/htslib/Makefile ]; then cd src/htslib && make && make lib-static && cd ../../ && touch .htslib; fi
 
-src/streq: ${SUBMODULES} $(SVSOURCES)
+src/streq: ${SUBMODULES} $(SOURCES)
 	$(CXX) $(CXXFLAGS) $@.cpp -o $@ $(LDFLAGS)
 
-src/preprocess: ${SUBMODULES} $(SVSOURCES)
+src/preprocess: ${SUBMODULES} $(SOURCES)
 	$(CXX) $(CXXFLAGS) $@.cpp -o $@ $(LDFLAGS)
 
 install: ${BUILT_PROGRAMS}
@@ -57,5 +57,10 @@ install: ${BUILT_PROGRAMS}
 	install -p ${BUILT_PROGRAMS} ${bindir}
 
 clean:
-	cd src/htslib && make clean
+	if [ -r src/htslib/Makefile ]; then cd src/htslib && make clean; fi
 	rm -f $(TARGETS) $(TARGETS:=.o) ${SUBMODULES}
+
+distclean: clean
+	rm -f ${BUILT_PROGRAMS}
+
+.PHONY: clean distclean install all
