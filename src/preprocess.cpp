@@ -1,8 +1,8 @@
 /*
 ============================================================================
-Strand-Seq Watson-Crick Classifier
+Single Cell Sequencing Analysis Methods
 ============================================================================
-Copyright (C) 2016 Tobias Rausch
+Copyright (C) 2018 Tobias Rausch
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

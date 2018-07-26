@@ -1,8 +1,7 @@
 .htslib
-.boost
-src/streq
-src/preprocess
+src/sc
 bin/
+*~
 
 # Compiled Object files
 *.slo

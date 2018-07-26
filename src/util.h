@@ -1,8 +1,8 @@
 /*
 ============================================================================
-Strand-Seq Utility Functions
+Single Cell Sequencing Analysis Methods
 ============================================================================
-Copyright (C) 2016 Tobias Rausch
+Copyright (C) 2018 Tobias Rausch
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -21,16 +21,61 @@ Contact: Tobias Rausch (rausch@embl.de)
 ============================================================================
 */
 
-#ifndef STRANDUTIL_H
-#define STRANDUTIL_H
+#ifndef UTIL_H
+#define UTIL_H
 
+#include <boost/algorithm/string.hpp>
+#include <boost/tokenizer.hpp>
 #include <boost/math/distributions/chi_squared.hpp>
 #include <boost/math/distributions/hypergeometric.hpp>
 
 
-namespace streq
+namespace sc
 {
 
+  inline bool
+  getSMTag(std::string const& header, std::string const& fileName, std::string& sampleName) {
+    std::set<std::string> smIdentifiers;
+    std::string delimiters("\n");
+    typedef std::vector<std::string> TStrParts;
+    TStrParts lines;
+    boost::split(lines, header, boost::is_any_of(delimiters));
+    TStrParts::const_iterator itH = lines.begin();
+    TStrParts::const_iterator itHEnd = lines.end();
+    bool rgPresent = false;
+    for(;itH!=itHEnd; ++itH) {
+      if (itH->find("@RG")==0) {
+	std::string delim("\t");
+	TStrParts keyval;
+	boost::split(keyval, *itH, boost::is_any_of(delim));
+	TStrParts::const_iterator itKV = keyval.begin();
+	TStrParts::const_iterator itKVEnd = keyval.end();
+	for(;itKV != itKVEnd; ++itKV) {
+	  size_t sp = itKV->find(":");
+	  if (sp != std::string::npos) {
+	    std::string field = itKV->substr(0, sp);
+	    if (field == "ID") {
+	      rgPresent = true;
+	      std::string rgSM = itKV->substr(sp+1);
+	      smIdentifiers.insert(rgSM);
+	    }
+	  }
+	}
+      }
+    }
+    if (!rgPresent) {
+      sampleName = fileName;
+      return true;
+    } else if (smIdentifiers.size() == 1) {
+      sampleName = *(smIdentifiers.begin());
+      return true;
+    } else {
+      sampleName = "";
+      return false;
+    }
+  }
+
+  
   inline uint32_t alignmentLength(bam1_t const* rec) {
     uint32_t* cigar = bam_get_cigar(rec);
     uint32_t alen = 0;
