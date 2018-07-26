@@ -45,6 +45,7 @@ Contact: Tobias Rausch (rausch@embl.de)
 
 #include "util.h"
 #include "json.h"
+#include "tsv.h"
 
 namespace sc
 {
@@ -52,7 +53,9 @@ namespace sc
   struct CountConfig {
     unsigned short minMapQual;
     uint32_t window;
+    uint32_t minchrsize;
     std::string method;
+    std::string format;
     std::vector<std::string> sampleName;
     boost::filesystem::path outfile;
     std::vector<boost::filesystem::path> files;
@@ -81,10 +84,12 @@ namespace sc
     boost::program_options::options_description generic("Generic options");
     generic.add_options()
       ("help,?", "show help message")
-      ("type,t", boost::program_options::value<std::string>(&c.method)->default_value("StrandSeq"), "single cell seq. method [StrandSeq|Malbac]")
+      ("type,t", boost::program_options::value<std::string>(&c.method)->default_value("StrandSeq"), "single cell seq. method [StrandSeq]")
       ("map-qual,q", boost::program_options::value<unsigned short>(&c.minMapQual)->default_value(1), "min. mapping quality")
-      ("window,w", boost::program_options::value<uint32_t>(&c.window)->default_value(200000), "window length")
-      ("outfile", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("out.json.gz"), "output file")
+      ("window,w", boost::program_options::value<uint32_t>(&c.window)->default_value(200000), "window size")
+      ("minchrsize,m", boost::program_options::value<uint32_t>(&c.minchrsize)->default_value(10000000), "min. chr size")
+      ("format,f", boost::program_options::value<std::string>(&c.format)->default_value("json"), "output format [json|tsv]")
+      ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("out.json.gz"), "output file")
       ;
     
     boost::program_options::options_description hidden("Hidden options");
@@ -160,11 +165,19 @@ namespace sc
     typedef std::pair<uint32_t, uint32_t> TWatsonCrick;
     typedef std::vector<TWatsonCrick> TChrWC;
     typedef std::vector<TChrWC> TGenomicWC;
-    TGenomicWC gWC(hdr[0]->n_targets, TChrWC());
-    for (int refIndex = 0; refIndex<hdr[0]->n_targets; ++refIndex) {
-      if (hdr[0]->target_len[refIndex] < c.window) continue;
-      uint32_t bins = hdr[0]->target_len[refIndex] / c.window + 1;
-      gWC[refIndex].resize(bins);
+    typedef std::vector<TGenomicWC> TSampleWC;
+    TSampleWC sWC(c.files.size(), TGenomicWC());
+    for(uint32_t file_c = 0; file_c < c.files.size(); ++file_c) {
+      sWC[file_c].resize(hdr[0]->n_targets, TChrWC());
+      for (int32_t refIndex = 0; refIndex<hdr[0]->n_targets; ++refIndex) {
+	if (hdr[0]->target_len[refIndex] < c.minchrsize) continue;
+	uint32_t bins = hdr[0]->target_len[refIndex] / c.window + 1;
+	sWC[file_c][refIndex].resize(bins);
+	for (uint32_t k = 0; k < bins; ++k) {
+	  sWC[file_c][refIndex][k].first = 0;
+	  sWC[file_c][refIndex][k].second = 0;
+	}
+      }
     }
     
     // Parse bam (contig by contig)
@@ -173,7 +186,7 @@ namespace sc
     boost::progress_display show_progress( hdr[0]->n_targets );
     for (int refIndex = 0; refIndex<hdr[0]->n_targets; ++refIndex) {
       ++show_progress;
-      if (!gWC[refIndex].size()) continue;
+      if (!sWC[0][refIndex].size()) continue;
       for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
 	hts_itr_t* iter = sam_itr_queryi(idx[file_c], refIndex, 0, hdr[0]->target_len[refIndex]);
 	bam1_t* rec = bam_init1();
@@ -182,12 +195,10 @@ namespace sc
 	  if ((rec->core.qual < c.minMapQual) || (rec->core.tid<0)) continue;
 	
 	  int32_t pos = rec->core.pos + halfAlignmentLength(rec);
-	  if (rec->core.flag & BAM_FREAD1) 
-	    if (rec->core.flag & BAM_FREVERSE) ++gWC[refIndex][(int) (pos / c.window)].second;
-	    else ++gWC[refIndex][(int) (pos / c.window)].first;
-	  else
-	    if (rec->core.flag & BAM_FREVERSE) ++gWC[refIndex][(int) (pos / c.window)].first;
-	    else ++gWC[refIndex][(int) (pos / c.window)].second;
+	  if (rec->core.flag & BAM_FREAD1) { 
+	    if (rec->core.flag & BAM_FREVERSE) ++sWC[file_c][refIndex][(int) (pos / c.window)].second;
+	    else ++sWC[file_c][refIndex][(int) (pos / c.window)].first;
+	  }
 	}
 	bam_destroy1(rec);
 	hts_itr_destroy(iter);
@@ -197,7 +208,8 @@ namespace sc
     // Output
     now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Output Single Cell Counts" << std::endl;
-    scJsonOut(c, hdr, gWC);
+    if (c.format == "tsv") scTsvOut(c, hdr, sWC);
+    else scJsonOut(c, hdr, sWC);
 
     // End
     now = boost::posix_time::second_clock::local_time();

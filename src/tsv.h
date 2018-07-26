@@ -21,8 +21,8 @@ Contact: Tobias Rausch (rausch@embl.de)
 ============================================================================
 */
 
-#ifndef JSON_H
-#define JSON_H
+#ifndef TSV_H
+#define TSV_H
 
 #include <boost/progress.hpp>
 #include <boost/iostreams/filtering_streambuf.hpp>
@@ -37,50 +37,21 @@ namespace sc
 
   template<typename TConfig, typename THeader, typename TSampleWC>
   inline void
-  scJsonOut(TConfig const& c, THeader const& hdr, TSampleWC const& sWC) {
+  scTsvOut(TConfig const& c, THeader const& hdr, TSampleWC const& sWC) {
     boost::iostreams::filtering_ostream rfile;
     rfile.push(boost::iostreams::gzip_compressor());
     rfile.push(boost::iostreams::file_sink(c.outfile.string().c_str(), std::ios_base::out | std::ios_base::binary));
-    rfile << "{" << std::endl;
-    rfile << "\"data\": [" << std::endl;
+    rfile << "sample\tchr\tpos\twatson\tcrick" << std::endl;
     for(uint32_t i = 0; i < c.sampleName.size(); ++i) {
-      if (i > 0) rfile << "," << std::endl;
-      rfile << "{" << std::endl;
-      rfile << "\"sample\": \"" << c.sampleName[i] << "\"," << std::endl;
-      rfile << "\"coverages\": [" << std::endl;
       for (int32_t refIndex = 0; refIndex<hdr[i]->n_targets; ++refIndex) {
 	if (!sWC[0][refIndex].size()) continue;
-	if (refIndex > 0) rfile << "," << std::endl;
-	rfile << "{" << std::endl;
-	rfile << "\"chromosome\": \"" << hdr[i]->target_name[refIndex] << "\"," << std::endl;
-	rfile << "\"positions\": [" << std::endl;
 	int32_t pos = 0;
 	for (uint32_t k = 0; k < sWC[i][refIndex].size(); ++k) {
-	  if (k > 0) rfile << ", ";
-	  rfile << pos;
+	  rfile << c.sampleName[i] << "\t" << hdr[i]->target_name[refIndex] << "\t" << pos << "\t" << sWC[i][refIndex][k].first << "\t" << sWC[i][refIndex][k].second << std::endl;
 	  pos += c.window;
 	}
-	rfile << "]," << std::endl;
-	rfile << "\"watson\": [" << std::endl;
-	for (uint32_t k = 0; k < sWC[i][refIndex].size(); ++k) {
-	  if (k > 0) rfile << ", ";
-	  rfile << sWC[i][refIndex][k].first;
-	}
-	rfile << "]," << std::endl;
-	rfile << "\"crick\": [" << std::endl;
-	for (uint32_t k = 0; k < sWC[i][refIndex].size(); ++k) {
-	  if (k > 0) rfile << ", ";
-	  rfile << sWC[i][refIndex][k].second;
-	}
-	rfile << "]" << std::endl;
-	rfile << "}";
       }
-      rfile << "]" << std::endl;
-      rfile << "}";
     }
-    rfile << "]" << std::endl;
-    rfile << std::endl;
-    rfile << "}" << std::endl;
     rfile.pop();
   }
  
