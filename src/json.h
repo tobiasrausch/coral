@@ -42,12 +42,11 @@ namespace sc
     rfile.push(boost::iostreams::gzip_compressor());
     rfile.push(boost::iostreams::file_sink(c.outfile.string().c_str(), std::ios_base::out | std::ios_base::binary));
     rfile << "{" << std::endl;
-    rfile << "\"samples\": [" << std::endl;
+    rfile << "\"data\": [" << std::endl;
     for(uint32_t i = 0; i < c.sampleName.size(); ++i) {
       if (i > 0) rfile << "," << std::endl;
       rfile << "{" << std::endl;
-      rfile << "\"name\": \"" << c.sampleName[i] << "\"," << std::endl;
-      rfile << "\"data\": {" << std::endl;
+      rfile << "\"sample\": \"" << c.sampleName[i] << "\"," << std::endl;
       rfile << "\"coverages\": [" << std::endl;
       for (int32_t refIndex = 0; refIndex<hdr[i]->n_targets; ++refIndex) {
 	if (!gWC[refIndex].size()) continue;
@@ -77,7 +76,6 @@ namespace sc
 	rfile << "}";
       }
       rfile << "]" << std::endl;
-      rfile << "}" << std::endl;
       rfile << "}";
     }
     rfile << "]" << std::endl;
