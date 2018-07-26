@@ -61,17 +61,25 @@ namespace sc
 	  pos += c.window;
 	}
 	rfile << "]," << std::endl;
-	rfile << "\"watson\": [" << std::endl;
+	rfile << "\"counts\": [" << std::endl;
+	rfile << "{" << std::endl;
+	rfile << "\"label\": \"Watson\"," << std::endl;
+	rfile << "\"values\": [" << std::endl;
 	for (uint32_t k = 0; k < sWC[i][refIndex].size(); ++k) {
 	  if (k > 0) rfile << ", ";
 	  rfile << sWC[i][refIndex][k].first;
 	}
-	rfile << "]," << std::endl;
-	rfile << "\"crick\": [" << std::endl;
+	rfile << "]" << std::endl;
+	rfile << "}," << std::endl;
+	rfile << "{" <<	std::endl;
+	rfile << "\"label\": \"Crick\"," << std::endl;
+	rfile << "\"values\": [" << std::endl;
 	for (uint32_t k = 0; k < sWC[i][refIndex].size(); ++k) {
 	  if (k > 0) rfile << ", ";
 	  rfile << sWC[i][refIndex][k].second;
 	}
+	rfile << "]" << std::endl;
+	rfile << "}" << std::endl;
 	rfile << "]" << std::endl;
 	rfile << "}";
       }
