@@ -31,6 +31,7 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include <fstream>
 
 #define BOOST_DISABLE_ASSERTS
+#include <boost/unordered_map.hpp>
 #include <boost/program_options/cmdline.hpp>
 #include <boost/program_options/options_description.hpp>
 #include <boost/program_options/parsers.hpp>
@@ -40,6 +41,9 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include <boost/tuple/tuple.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/progress.hpp>
+#include <boost/dynamic_bitset.hpp>
+
+#include <htslib/faidx.h>
 #include <htslib/sam.h>
 #include <htslib/vcf.h>
 
@@ -51,13 +55,18 @@ namespace sc
 {
 
   struct CountConfig {
-    unsigned short minMapQual;
+    uint16_t minMapQual;
     uint32_t window;
     uint32_t minchrsize;
+    int32_t minisize;
+    int32_t maxisize;
+    int32_t blacklistn;
+    int32_t percentid;
     std::string method;
     std::string format;
     std::vector<std::string> sampleName;
     boost::filesystem::path outfile;
+    boost::filesystem::path genome;
     std::vector<boost::filesystem::path> files;
   };
   
@@ -85,7 +94,12 @@ namespace sc
     generic.add_options()
       ("help,?", "show help message")
       ("type,t", boost::program_options::value<std::string>(&c.method)->default_value("StrandSeq"), "single cell seq. method [StrandSeq]")
-      ("map-qual,q", boost::program_options::value<unsigned short>(&c.minMapQual)->default_value(1), "min. mapping quality")
+      ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
+      ("map-qual,q", boost::program_options::value<uint16_t>(&c.minMapQual)->default_value(1), "min. mapping quality")
+      ("minisize,i", boost::program_options::value<int32_t>(&c.minisize)->default_value(50), "min. fragment size")
+      ("maxisize,j", boost::program_options::value<int32_t>(&c.maxisize)->default_value(1000), "max. fragment size")
+      ("blacklist,b", boost::program_options::value<int32_t>(&c.blacklistn)->default_value(10), "remove windows with >N%")
+      ("percentid,p", boost::program_options::value<int32_t>(&c.percentid)->default_value(98), "min. required percent identity")
       ("window,w", boost::program_options::value<uint32_t>(&c.window)->default_value(200000), "window size")
       ("minchrsize,m", boost::program_options::value<uint32_t>(&c.minchrsize)->default_value(10000000), "min. chr size")
       ("format,f", boost::program_options::value<std::string>(&c.format)->default_value("json"), "output format [json|tsv]")
@@ -109,8 +123,8 @@ namespace sc
     boost::program_options::notify(vm);
     
     // Check command line arguments
-    if ((vm.count("help")) || (!vm.count("input-file"))) {
-      std::cout << "Usage: sc " << argv[0] << " [OPTIONS] <sc1.bam> <sc2.bam> ... <scN.bam>" << std::endl;
+    if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("genome"))) {
+      std::cout << "Usage: sc " << argv[0] << " [OPTIONS] -g <ref.fa> <sc1.bam> <sc2.bam> ... <scN.bam>" << std::endl;
       std::cout << visible_options << "\n";
       return 1;
     } 
@@ -128,6 +142,21 @@ namespace sc
 	std::cerr << "Input BAM file is missing: " << c.files[file_c].string() << std::endl;
 	return 1;
       }
+    }
+
+    // Check reference
+    if (!(boost::filesystem::exists(c.genome) && boost::filesystem::is_regular_file(c.genome) && boost::filesystem::file_size(c.genome))) {
+      std::cerr << "Reference file is missing: " << c.genome.string() << std::endl;
+      return 1;
+    } else {
+      faidx_t* fai = fai_load(c.genome.string().c_str());
+      if (fai == NULL) {
+	if (fai_build(c.genome.string().c_str()) == -1) {
+	  std::cerr << "Fail to open genome fai index for " << c.genome.string() << std::endl;
+	  return 1;
+	} else fai = fai_load(c.genome.string().c_str());
+      }
+      fai_destroy(fai);
     }
     
     // Load bam files
@@ -154,6 +183,15 @@ namespace sc
 	std::cerr << "Fail to open header for " << c.files[file_c].string() << std::endl;
 	return 1;
       }
+      faidx_t* fai = fai_load(c.genome.string().c_str());
+      for(int32_t refIndex=0; refIndex < hdr[file_c]->n_targets; ++refIndex) {
+	std::string tname(hdr[file_c]->target_name[refIndex]);
+	if (!faidx_has_seq(fai, tname.c_str())) {
+	  std::cerr << "BAM file chromosome " << hdr[file_c]->target_name[refIndex] << " is NOT present in your reference file " << c.genome.string() << std::endl;
+	  return 1;
+	}
+      }
+      fai_destroy(fai);
       std::string sampleName;
       if (!getSMTag(std::string(hdr[file_c]->text), c.files[file_c].stem().string(), sampleName)) {
 	std::cerr << "Only one sample (@RG:SM) is allowed per input BAM file " << c.files[file_c].string() << std::endl;
@@ -187,22 +225,138 @@ namespace sc
     for (int refIndex = 0; refIndex<hdr[0]->n_targets; ++refIndex) {
       ++show_progress;
       if (!sWC[0][refIndex].size()) continue;
+
+      // Load chromosome
+      char* seq = NULL;
+      faidx_t* fai = fai_load(c.genome.string().c_str());
+      int32_t seqlen = -1;
+      std::string tname(hdr[0]->target_name[refIndex]);
+      seq = faidx_fetch_seq(fai, tname.c_str(), 0, hdr[0]->target_len[refIndex], &seqlen);
+      
+      // Ns
+      typedef std::vector<bool> TWindowBlackList;
+      TWindowBlackList gBL(sWC[0][refIndex].size(), false);
+      int32_t pos = 0;
+      for(uint32_t k = 0; k < gBL.size(); ++k) {
+	uint32_t ncount = 0;
+	for(uint32_t l = pos; l < pos + c.window; ++l) {
+	  if ((seq[l] == 'n') || (seq[l] == 'N')) ++ncount;
+	}
+	double nfrac = (double) ncount / (double) c.window;
+	if (nfrac > (double) c.blacklistn / (double) 100) gBL[k] = true;
+	pos += c.window;
+      }
+
+      // Parse BAM
       for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
+	// Qualities and alignment length
+	typedef boost::unordered_map<std::size_t, uint8_t> TQualities;
+	TQualities qualities;
+
 	hts_itr_t* iter = sam_itr_queryi(idx[file_c], refIndex, 0, hdr[0]->target_len[refIndex]);
-	bam1_t* rec = bam_init1();
+	bam1_t* rec = bam_init1();	
+	int32_t lastAlignedPos = 0;
+	std::set<std::size_t> lastAlignedPosReads;
 	while (sam_itr_next(samfile[file_c], iter, rec) >= 0) {
 	  if (rec->core.flag & (BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FSUPPLEMENTARY | BAM_FUNMAP)) continue;
 	  if ((rec->core.qual < c.minMapQual) || (rec->core.tid<0)) continue;
-	
-	  int32_t pos = rec->core.pos + halfAlignmentLength(rec);
-	  if (rec->core.flag & BAM_FREAD1) { 
-	    if (rec->core.flag & BAM_FREVERSE) ++sWC[file_c][refIndex][(int) (pos / c.window)].second;
-	    else ++sWC[file_c][refIndex][(int) (pos / c.window)].first;
+	  
+	  
+	  // Clean-up the read store for identical alignment positions
+	  if (rec->core.pos > lastAlignedPos) {
+	    lastAlignedPosReads.clear();
+	    lastAlignedPos = rec->core.pos;
+	  }
+
+	  // Sequence
+	  std::string sequence;
+	  sequence.resize(rec->core.l_qseq);
+	  uint8_t* seqptr = bam_get_seq(rec);
+	  for (int i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
+
+	  // Reference slice
+	  std::string refslice = boost::to_upper_copy(std::string(seq + rec->core.pos, seq + lastAlignedPosition(rec)));
+	      
+	  // Percent identity
+	  uint32_t rp = 0; // reference pointer
+	  uint32_t sp = 0; // sequence pointer
+	  uint32_t* cigar = bam_get_cigar(rec);
+	  int32_t matchCount = 0;
+	  int32_t mismatchCount = 0;
+	  for (std::size_t i = 0; i < rec->core.n_cigar; ++i) {
+	    if ((bam_cigar_op(cigar[i]) == BAM_CMATCH) || (bam_cigar_op(cigar[i]) == BAM_CEQUAL) || (bam_cigar_op(cigar[i]) == BAM_CDIFF)) {
+	      // match or mismatch
+	      for(std::size_t k = 0; k<bam_cigar_oplen(cigar[i]);++k) {
+		if (sequence[sp] == refslice[rp]) ++matchCount;
+		else ++mismatchCount;
+		++sp;
+		++rp;
+	      }
+	    } else if (bam_cigar_op(cigar[i]) == BAM_CDEL) {
+	      ++mismatchCount;
+	      rp += bam_cigar_oplen(cigar[i]);
+	    } else if (bam_cigar_op(cigar[i]) == BAM_CINS) {
+	      ++mismatchCount;
+	      sp += bam_cigar_oplen(cigar[i]);
+	    } else if (bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) {
+	      sp += bam_cigar_oplen(cigar[i]);
+	    } else if(bam_cigar_op(cigar[i]) == BAM_CHARD_CLIP) {
+	    } else if (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP) {
+	      rp += bam_cigar_oplen(cigar[i]);
+	    } else {
+	      std::cerr << "Unknown Cigar options" << std::endl;
+	      return 1;
+	    }
+	  }
+	  double percid = 0;
+	  if (matchCount + mismatchCount > 0) percid = (double) matchCount / (double) (matchCount + mismatchCount);
+	  if (percid < ((double) c.percentid / (double) 100)) continue;
+	  
+	  // Paired-end data
+	  if (rec->core.flag & BAM_FPAIRED) {
+	    if ((rec->core.mtid<0) || (rec->core.flag & BAM_FMUNMAP)) continue;
+	    // Ignore translocation paired-ends
+	    if (rec->core.mtid != rec->core.tid) continue;
+
+	    if (_firstPairObs(rec, lastAlignedPosReads)) {
+	      // First read
+	      lastAlignedPosReads.insert(hash_string(bam_get_qname(rec)));
+	      std::size_t hv = hash_pair(rec);
+	      qualities[hv]= rec->core.qual;
+	    } else {
+	      // Second read
+	      std::size_t hv = hash_pair_mate(rec);
+	      uint8_t pairQuality = 0;
+	      if (qualities.find(hv) == qualities.end()) continue; // Mate discarded
+	      pairQuality = std::min((uint8_t) qualities[hv], (uint8_t) rec->core.qual);
+	      qualities[hv] = 0;
+
+	      // Pair quality
+	      if (pairQuality < c.minMapQual) continue;
+
+	      // Insert size filter
+	      int32_t isize = (rec->core.pos + alignmentLength(rec)) - rec->core.mpos;
+	      if ((isize < c.minisize) || (isize > c.maxisize)) continue;
+
+	      // Count fragment mid-points
+	      int32_t pos = rec->core.mpos + (int32_t) (isize/2);
+	      int32_t binny = (int) (pos / c.window);
+	      if (!gBL[binny]) {
+		if (rec->core.flag & BAM_FREAD1) { 
+		  if (rec->core.flag & BAM_FREVERSE) ++sWC[file_c][refIndex][binny].second;
+		  else ++sWC[file_c][refIndex][binny].first;
+		} else {
+		  if (rec->core.flag & BAM_FREVERSE) ++sWC[file_c][refIndex][binny].first;
+		  else ++sWC[file_c][refIndex][binny].second;
+		}
+	      }
+	    }
 	  }
 	}
 	bam_destroy1(rec);
 	hts_itr_destroy(iter);
       }
+      if (seq != NULL) free(seq);
     }
 
     // Output

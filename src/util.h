@@ -75,13 +75,53 @@ namespace sc
     }
   }
 
+  inline unsigned hash_string(const char *s) {
+    unsigned h = 37;
+    while (*s) {
+      h = (h * 54059) ^ (s[0] * 76963);
+      s++;
+    }
+    return h;
+  }
+  
+  inline std::size_t hash_pair(bam1_t* rec) {
+    std::size_t seed = hash_string(bam_get_qname(rec));
+    boost::hash_combine(seed, rec->core.tid);
+    boost::hash_combine(seed, rec->core.pos);
+    boost::hash_combine(seed, rec->core.mtid);
+    boost::hash_combine(seed, rec->core.mpos);
+    return seed;
+  }
+
+  inline std::size_t hash_pair_mate(bam1_t* rec) {
+    std::size_t seed = hash_string(bam_get_qname(rec));
+    boost::hash_combine(seed, rec->core.mtid);
+    boost::hash_combine(seed, rec->core.mpos);
+    boost::hash_combine(seed, rec->core.tid);
+    boost::hash_combine(seed, rec->core.pos);
+    return seed;
+  }
+
+
+  template<typename TAlignedReads>
+  inline bool
+  _firstPairObs(bam1_t* rec, TAlignedReads const& lastAlignedPosReads) {
+    if (rec->core.tid == rec->core.mtid) return ((rec->core.pos < rec->core.mpos) || ((rec->core.pos == rec->core.mpos) && (lastAlignedPosReads.find(hash_string(bam_get_qname(rec))) == lastAlignedPosReads.end())));
+    else return (rec->core.tid < rec->core.mtid);
+  }
+  
   
   inline uint32_t alignmentLength(bam1_t const* rec) {
     uint32_t* cigar = bam_get_cigar(rec);
     uint32_t alen = 0;
     for (std::size_t i = 0; i < rec->core.n_cigar; ++i)
-      if (bam_cigar_op(cigar[i]) == BAM_CMATCH) alen+=bam_cigar_oplen(cigar[i]);
+      if ((bam_cigar_op(cigar[i]) == BAM_CMATCH) || (bam_cigar_op(cigar[i]) == BAM_CEQUAL) || (bam_cigar_op(cigar[i]) == BAM_CDIFF) || (bam_cigar_op(cigar[i]) == BAM_CDEL) || (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP)) alen += bam_cigar_oplen(cigar[i]);
     return alen;
+  }
+
+  inline uint32_t
+  lastAlignedPosition(bam1_t const* rec) {
+    return rec->core.pos + alignmentLength(rec);
   }
 
   inline uint32_t halfAlignmentLength(bam1_t const* rec) {
