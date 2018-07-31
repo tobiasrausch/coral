@@ -59,6 +59,7 @@ namespace sc
     uint32_t window;
     uint32_t minchrsize;
     int32_t minisize;
+    int32_t meanisize;
     int32_t maxisize;
     int32_t blacklistn;
     int32_t percentid;
@@ -96,8 +97,9 @@ namespace sc
       ("type,t", boost::program_options::value<std::string>(&c.method)->default_value("StrandSeq"), "single cell seq. method [StrandSeq]")
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
       ("map-qual,q", boost::program_options::value<uint16_t>(&c.minMapQual)->default_value(1), "min. mapping quality")
-      ("minisize,i", boost::program_options::value<int32_t>(&c.minisize)->default_value(50), "min. fragment size")
-      ("maxisize,j", boost::program_options::value<int32_t>(&c.maxisize)->default_value(1000), "max. fragment size")
+      ("meanisize,i", boost::program_options::value<int32_t>(&c.meanisize)->default_value(200), "mean fragment size")
+      ("minisize,j", boost::program_options::value<int32_t>(&c.minisize)->default_value(50), "min. fragment size")
+      ("maxisize,k", boost::program_options::value<int32_t>(&c.maxisize)->default_value(1000), "max. fragment size")
       ("blacklist,b", boost::program_options::value<int32_t>(&c.blacklistn)->default_value(10), "remove windows with >N%")
       ("percentid,p", boost::program_options::value<int32_t>(&c.percentid)->default_value(98), "min. required percent identity")
       ("window,w", boost::program_options::value<uint32_t>(&c.window)->default_value(200000), "window size")
@@ -135,6 +137,9 @@ namespace sc
     std::cout << "sc ";
     for(int i=0; i<argc; ++i) { std::cout << argv[i] << ' '; }
     std::cout << std::endl;
+
+    // Make sure mean fragment size is even
+    c.meanisize = (int32_t) (c.meanisize / 2) * 2;
     
     // Check BAM files
     for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
@@ -217,6 +222,10 @@ namespace sc
 	}
       }
     }
+
+    // GC-Bias
+    std::vector<int32_t> gcbias(c.meanisize + 2, 0);
+    std::vector<int32_t> refgc(c.meanisize + 2, 0);
     
     // Parse bam (contig by contig)
     now = boost::posix_time::second_clock::local_time();
@@ -239,7 +248,7 @@ namespace sc
       int32_t pos = 0;
       for(uint32_t k = 0; k < gBL.size(); ++k) {
 	uint32_t ncount = 0;
-	for(uint32_t l = pos; l < pos + c.window; ++l) {
+	for(uint32_t l = pos; ((l < pos + c.window) && (l < hdr[0]->target_len[refIndex])); ++l) {
 	  if ((seq[l] == 'n') || (seq[l] == 'N')) ++ncount;
 	}
 	double nfrac = (double) ncount / (double) c.window;
@@ -247,6 +256,38 @@ namespace sc
 	pos += c.window;
       }
 
+      // GC- and N-content
+      typedef boost::dynamic_bitset<> TBitSet;
+      TBitSet nrun(hdr[0]->target_len[refIndex], false);
+      TBitSet gcref(hdr[0]->target_len[refIndex], false);
+      for(uint32_t i = 0; i < hdr[0]->target_len[refIndex]; ++i) {
+	if ((seq[i] == 'c') || (seq[i] == 'C') || (seq[i] == 'g') || (seq[i] == 'G')) gcref[i] = 1;
+	if ((seq[i] == 'n') || (seq[i] == 'N')) nrun[i] = 1;
+      }
+
+      // Reference GC
+      if (( (int32_t) hdr[0]->target_len[refIndex] > c.meanisize + 2) && (hdr[0]->target_len[refIndex] >= c.minchrsize)) {
+	int32_t halfwin = (int32_t) (c.meanisize / 2);
+	int32_t nsum = 0;
+	int32_t gcsum = 0;
+	for(int32_t pos = halfwin; pos < (int32_t) hdr[0]->target_len[refIndex] - halfwin; ++pos) {
+	  if (pos == halfwin) {
+	    for(int32_t i = pos - halfwin; i<pos+halfwin+1; ++i) {
+	      nsum += nrun[i];
+	      gcsum += gcref[i];
+	    }
+	  } else {
+	    nsum -= nrun[pos - halfwin - 1];
+	    gcsum -= gcref[pos - halfwin - 1];
+	    nsum += nrun[pos + halfwin];
+	    gcsum += gcref[pos + halfwin];
+	  }
+	  //std::string refslice = boost::to_upper_copy(std::string(seq + pos - halfwin, seq + pos + halfwin + 1));
+	  //std::cerr << refslice << ',' << refslice.size() << ',' << gcsum << ',' << nsum << std::endl;
+	  if (!nsum) ++refgc[gcsum];
+	}
+      }
+    
       // Parse BAM
       for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
 	// Qualities and alignment length
@@ -341,13 +382,28 @@ namespace sc
 	      // Count fragment mid-points
 	      int32_t pos = rec->core.mpos + (int32_t) (isize/2);
 	      int32_t binny = (int) (pos / c.window);
-	      if (!gBL[binny]) {
-		if (rec->core.flag & BAM_FREAD1) { 
-		  if (rec->core.flag & BAM_FREVERSE) ++sWC[file_c][refIndex][binny].second;
-		  else ++sWC[file_c][refIndex][binny].first;
-		} else {
-		  if (rec->core.flag & BAM_FREVERSE) ++sWC[file_c][refIndex][binny].first;
-		  else ++sWC[file_c][refIndex][binny].second;
+	      if (!gBL[binny]) {		
+		int32_t fragstart = pos - (c.meanisize / 2);
+		int32_t fragend = pos + (c.meanisize / 2) + 1;
+		if ((fragstart >= 0) && (fragend < (int32_t) hdr[0]->target_len[refIndex])) {
+		  int32_t ncount = 0;
+		  for(int32_t i = fragstart; i < fragend; ++i) {
+		    if (nrun[i]) ++ncount;
+		  }
+		  if (!ncount) {
+		    int32_t gccount = 0;
+		    for(int32_t i = fragstart; i < fragend; ++i) {
+		      if (gcref[i]) ++gccount;
+		    }
+		    ++gcbias[gccount];
+		    if (rec->core.flag & BAM_FREAD1) { 
+		      if (rec->core.flag & BAM_FREVERSE) ++sWC[file_c][refIndex][binny].second;
+		      else ++sWC[file_c][refIndex][binny].first;
+		    } else {
+		      if (rec->core.flag & BAM_FREVERSE) ++sWC[file_c][refIndex][binny].first;
+		      else ++sWC[file_c][refIndex][binny].second;
+		    }
+		  }
 		}
 	      }
 	    }
@@ -358,6 +414,10 @@ namespace sc
       }
       if (seq != NULL) free(seq);
     }
+
+    // Output GC-bia
+    for(uint32_t i = 0; i < gcbias.size(); ++i) std::cerr << i << "\t" << gcbias[i] << "\tSample" << std::endl;
+    for(uint32_t i = 0; i < refgc.size(); ++i) std::cerr << i << "\t" << refgc[i] << "\tReference" << std::endl;
 
     // Output
     now = boost::posix_time::second_clock::local_time();
