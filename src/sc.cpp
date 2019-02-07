@@ -34,6 +34,7 @@ Contact: Tobias Rausch (rausch@embl.de)
 
 #include "version.h"
 #include "count.h"
+#include "map.h"
 
 using namespace sc;
 
@@ -75,6 +76,8 @@ int main(int argc, char **argv) {
   }
   else if ((std::string(argv[1]) == "count")) {
     return count(argc-1,argv+1);
+  } else if ((std::string(argv[1]) == "map")) {
+    return countReads(argc-1,argv+1);
   } else {
     std::cerr << "Unrecognized command " << std::string(argv[1]) << std::endl;
     return 1;
