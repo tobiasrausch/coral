@@ -42,6 +42,7 @@ namespace sc
 {
 
   struct CountDNAConfig {
+    uint32_t meanisize;
     uint32_t window_size;
     uint32_t window_offset;
     uint16_t minQual;
@@ -67,10 +68,6 @@ namespace sc
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "BAM file parsing" << std::endl;
     boost::progress_display show_progress( hdr->n_targets );
 
-    // Mate map
-    typedef boost::unordered_map<std::size_t, bool> TMateMap;
-    TMateMap mateMap;
-
     // Open output file
     boost::iostreams::filtering_ostream dataOut;
     dataOut.push(boost::iostreams::gzip_compressor());
@@ -94,22 +91,18 @@ namespace sc
       if (mapped) nodata = false;
       if (nodata) continue;
 
-      // Get mappability map and genome reference
+      // Check presence in mappability map
       std::string tname(hdr->target_name[refIndex]);
       int32_t seqlen = faidx_seq_len(faiMap, tname.c_str());
-      if (seqlen <= 0) continue;
-      if (seqlen != (int32_t) hdr->target_len[refIndex]) {
-	std::cerr << "Warning: Likely inconsistency between BAM file chromosomes and mappability map!" << std::endl;
-      }
+      if (seqlen == - 1) continue;
+      else seqlen = -1;
+      char* seq = faidx_fetch_seq(faiMap, tname.c_str(), 0, faidx_seq_len(faiMap, tname.c_str()), &seqlen);
+
+      // Check presence in reference
       seqlen = faidx_seq_len(faiRef, tname.c_str());
-      if (seqlen <= 0) continue;
-      if (seqlen != (int32_t) hdr->target_len[refIndex]) {
-	std::cerr << "Warning: Likely inconsistency between BAM file chromosomes and reference genome!" << std::endl;
-      }
-      int32_t sql = -1;
-      char* seq = faidx_fetch_seq(faiMap, tname.c_str(), 0, faidx_seq_len(faiMap, tname.c_str()), &sql);
-      sql = -1;
-      char* ref = faidx_fetch_seq(faiRef, tname.c_str(), 0, faidx_seq_len(faiRef, tname.c_str()), &sql);
+      if (seqlen == - 1) continue;
+      else seqlen = -1;
+      char* ref = faidx_fetch_seq(faiRef, tname.c_str(), 0, faidx_seq_len(faiRef, tname.c_str()), &seqlen);
 
       // Mappability
       typedef boost::dynamic_bitset<> TBitSet;
@@ -131,6 +124,10 @@ namespace sc
       uint32_t maxCoverage = std::numeric_limits<TCount>::max();
       typedef std::vector<TCount> TCoverage;
       TCoverage cov(hdr->target_len[refIndex], 0);
+
+      // Mate map
+      typedef boost::unordered_map<std::size_t, bool> TMateMap;
+      TMateMap mateMap;
       
       // Count reads
       hts_itr_t* iter = sam_itr_queryi(idx, refIndex, 0, hdr->target_len[refIndex]);
@@ -209,7 +206,8 @@ namespace sc
   
   int countReads(int argc, char **argv) {
     CountDNAConfig c;
-
+    c.meanisize = 357;
+    
     // Parameter
     boost::program_options::options_description generic("Generic options");
     generic.add_options()
@@ -290,6 +288,7 @@ namespace sc
     for(int i=0; i<argc; ++i) { std::cout << argv[i] << ' '; }
     std::cout << std::endl;
 
+    gcBias(c);
     return bamCount(c);
   }
 

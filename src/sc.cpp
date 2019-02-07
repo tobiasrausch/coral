@@ -75,8 +75,6 @@ int main(int argc, char **argv) {
     return 0;
   }
   else if ((std::string(argv[1]) == "count")) {
-    return count(argc-1,argv+1);
-  } else if ((std::string(argv[1]) == "map")) {
     return countReads(argc-1,argv+1);
   } else {
     std::cerr << "Unrecognized command " << std::string(argv[1]) << std::endl;
