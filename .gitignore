@@ -1,5 +1,5 @@
 .htslib
-src/cybrarian
+src/coral
 bin/
 *~
 

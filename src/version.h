@@ -1,9 +1,7 @@
 /*
 ============================================================================
-Single Cell Sequencing Analysis Methods
+Coral: COpy-numbeR ALterations
 ============================================================================
-Copyright (C) 2018 Tobias Rausch
-
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
 the Free Software Foundation, either version 3 of the License, or
@@ -24,22 +22,22 @@ Contact: Tobias Rausch (rausch@embl.de)
 #ifndef VERSION_H
 #define VERSION_H
 
-namespace cybrarian
+namespace coralns
 {
 
 
-  std::string scVersionNumber = "0.1.1";
+  std::string coralVersionNumber = "0.1.2";
 
   inline 
     void printTitle(std::string const& title) 
     {
       std::cout << "**********************************************************************" << std::endl;
-      std::cout << "Program: sc" << std::endl;
+      std::cout << "Program: " << title << std::endl;
       std::cout << "This is free software, and you are welcome to redistribute it under" << std::endl;
       std::cout << "certain conditions (GPL); for license details use '-l'." << std::endl;
       std::cout << "This program comes with ABSOLUTELY NO WARRANTY; for details use '-w'." << std::endl;
       std::cout <<  std::endl;
-      std::cout <<  title << " (Version: " << scVersionNumber << ")" << std::endl;
+      std::cout <<  title << " (Version: " << coralVersionNumber << ")" << std::endl;
       std::cout << "Contact: Tobias Rausch (rausch@embl.de)" << std::endl;
       std::cout << "**********************************************************************" << std::endl;
       std::cout << std::endl;

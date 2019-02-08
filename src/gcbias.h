@@ -1,6 +1,6 @@
 /*
 ============================================================================
-Cybrarian: CopY-numBeR vARIAtiaN discovery
+Coral: COpy-numbeR ALterations
 ============================================================================
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -39,10 +39,8 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include <htslib/vcf.h>
 
 #include "util.h"
-#include "json.h"
-#include "tsv.h"
 
-namespace cybrarian
+namespace coralns
 {
   struct GcBias {
     int32_t sample;

@@ -1,6 +1,6 @@
 /*
 ============================================================================
-Single cell methods
+Coral: COpy-numbeR ALterations
 ============================================================================
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -19,8 +19,8 @@ Contact: Tobias Rausch (rausch@embl.de)
 ============================================================================
 */
 
-#ifndef MAP_H
-#define MAP_H
+#ifndef COUNT_H
+#define COUNT_H
 
 #include <limits>
 
@@ -38,7 +38,7 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include "util.h"
 
 
-namespace cybrarian
+namespace coralns
 {
 
   struct CountDNAConfig {

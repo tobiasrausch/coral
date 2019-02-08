@@ -1,9 +1,7 @@
 /*
 ============================================================================
-Single Cell Sequencing Analysis Methods
+Coral: COpy-numbeR ALterations
 ============================================================================
-Copyright (C) 2018 Tobias Rausch
-
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
 the Free Software Foundation, either version 3 of the License, or
@@ -32,37 +30,43 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include "gperftools/profiler.h"
 #endif
 
-#include "version.h"
-#include "gcbias.h"
-#include "map.h"
+#include <htslib/faidx.h>
+#include <htslib/vcf.h>
+#include <htslib/sam.h>
 
-using namespace cybrarian;
+#include "version.h"
+#include "util.h"
+#include "gcbias.h"
+#include "count.h"
+
+
+using namespace coralns;
 
 
 inline void
 displayUsage() {
-  std::cout << "Usage: sc <command> <arguments>" << std::endl;
+  std::cout << "Usage: coral <command> <arguments>" << std::endl;
   std::cout << std::endl;
   std::cout << "Commands:" << std::endl;
   std::cout << std::endl;
-  std::cout << "    count        count single cell reads" << std::endl;
+  std::cout << "    count        count reads" << std::endl;
   std::cout << std::endl;
   std::cout << std::endl;
 }
 
 int main(int argc, char **argv) {
   if (argc < 2) { 
-    printTitle("sc");
+    printTitle("coral");
     displayUsage();
     return 0;
   }
   
   if ((std::string(argv[1]) == "version") || (std::string(argv[1]) == "--version") || (std::string(argv[1]) == "--version-only") || (std::string(argv[1]) == "-v")) {
-    std::cout << "sc version: v" << scVersionNumber << std::endl;
+    std::cout << "coral version: v" << coralVersionNumber << std::endl;
     return 0;
   }
   else if ((std::string(argv[1]) == "help") || (std::string(argv[1]) == "--help") || (std::string(argv[1]) == "-h") || (std::string(argv[1]) == "-?")) {
-    printTitle("sc");
+    printTitle("coral");
     displayUsage();
     return 0;
   }
