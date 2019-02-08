@@ -43,6 +43,20 @@ Contact: Tobias Rausch (rausch@embl.de)
 namespace coralns
 {
 
+  template<typename TConfig>
+  inline bool
+  chrNoData(TConfig const& c, uint32_t const refIndex, hts_idx_t const* idx) {
+    // Check we have mapped reads on this chromosome
+    std::string suffix("cram");
+    std::string str(c.bamFile.string());
+    if ((str.size() >= suffix.size()) && (str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0)) return false;
+    uint64_t mapped = 0;
+    uint64_t unmapped = 0;
+    hts_idx_get_stat(idx, refIndex, &mapped, &unmapped);
+    if (mapped) return false;
+    else return true;
+  }    
+  
   inline unsigned hash_string(const char *s) {
     unsigned h = 37;
     while (*s) {

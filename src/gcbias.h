@@ -85,11 +85,31 @@ namespace coralns
     
     return std::make_pair(lowerBound, upperBound);
   }
+
+  inline std::pair<uint32_t, uint32_t>
+  estCountBounds(std::vector< std::vector<uint32_t> > const& scanCounts) {
+    std::vector<uint32_t> all;
+    for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) all.insert(all.end(), scanCounts[refIndex].begin(), scanCounts[refIndex].end());
+    std::sort(all.begin(), all.end());
+    uint32_t median = all[all.size() / 2];
+    std::vector<uint32_t> absdev;
+    for(uint32_t i = 0; i<all.size(); ++i) absdev.push_back(std::abs((int32_t) all[i] - (int32_t) median));
+    std::sort(absdev.begin(), absdev.end());
+    uint32_t mad = absdev[absdev.size() / 2];
+    uint32_t lowerBound = 0;
+    if (3 * mad < median) lowerBound = median - 3 * mad;
+    uint32_t upperBound = median + 3 * mad;
+    return std::make_pair(lowerBound, upperBound);
+  }
   
 
   template<typename TConfig>
   inline void
-  gcBias(TConfig const& c, std::vector<GcBias>& gcbias) {
+  gcBias(TConfig const& c, std::vector< std::vector<uint32_t> > const& scanCounts, std::vector<GcBias>& gcbias) {
+
+    typedef std::pair<uint32_t, uint32_t> TCountBounds;
+    TCountBounds cb = estCountBounds(scanCounts);
+    
     // Load bam file
     samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
@@ -98,7 +118,7 @@ namespace coralns
 
     // Parse bam (contig by contig)
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "BAM file parsing" << std::endl;
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Estimate GC bias" << std::endl;
     boost::progress_display show_progress( hdr->n_targets );
 
     faidx_t* faiMap = fai_load(c.mapFile.string().c_str());
@@ -135,26 +155,27 @@ namespace coralns
 
       // Reference GC
       int32_t halfwin = (int32_t) (c.meanisize / 2);	
-      if (tname == "chr20") {
-	int32_t usum = 0;
-	int32_t gcsum = 0;
-	for(int32_t pos = halfwin; pos < (int32_t) hdr->target_len[refIndex] - halfwin; ++pos) {
-	  if (pos == halfwin) {
-	    for(int32_t i = pos - halfwin; i<=pos+halfwin; ++i) {
-	      usum += uniq[i];
-	      gcsum += gcref[i];
-	    }
-	  } else {
-	    usum -= uniq[pos - halfwin - 1];
-	    gcsum -= gcref[pos - halfwin - 1];
-	    usum += uniq[pos + halfwin];
-	    gcsum += gcref[pos + halfwin];
+      int32_t usum = 0;
+      int32_t gcsum = 0;
+      for(int32_t pos = halfwin; pos < (int32_t) hdr->target_len[refIndex] - halfwin; ++pos) {
+	if (pos == halfwin) {
+	  for(int32_t i = pos - halfwin; i<=pos+halfwin; ++i) {
+	    usum += uniq[i];
+	    gcsum += gcref[i];
 	  }
-	  //std::string refslice = boost::to_upper_copy(std::string(ref + pos - halfwin, ref + pos + halfwin + 1));
-	  //std::cerr << refslice << ',' << c.meanisize << ',' << gcsum << ',' << usum << std::endl;
-	  if (usum == c.meanisize) {
-	    //if ((pos >= 35000000) && (pos < 60000000))
-	    ++gcbias[gcsum].reference;
+	} else {
+	  usum -= uniq[pos - halfwin - 1];
+	  gcsum -= gcref[pos - halfwin - 1];
+	  usum += uniq[pos + halfwin];
+	  gcsum += gcref[pos + halfwin];
+	}
+	//std::string refslice = boost::to_upper_copy(std::string(ref + pos - halfwin, ref + pos + halfwin + 1));
+	//std::cerr << refslice << ',' << c.meanisize << ',' << gcsum << ',' << usum << std::endl;
+	if (usum == c.meanisize) {
+	  // Valid bin?
+	  uint32_t bin = pos / c.scanWindow;
+	  if (bin < scanCounts[refIndex].size()) {
+	    if ((scanCounts[refIndex][bin] > cb.first) && (scanCounts[refIndex][bin] < cb.second)) ++gcbias[gcsum].reference;
 	  }
 	}
       }
@@ -210,7 +231,13 @@ namespace coralns
 	    }
 	    //std::string refslice = boost::to_upper_copy(std::string(ref + fragstart, ref + fragend));
 	    //std::cerr << refslice << ',' << c.meanisize << ',' << gcsum << ',' << usum << std::endl;
-	    if (usum == c.meanisize) ++gcbias[gcsum].sample;
+	    if (usum == c.meanisize) {
+	      // Valid bin?
+	      uint32_t bin = midPoint / c.scanWindow;
+	      if (bin < scanCounts[refIndex].size()) {
+		if ((scanCounts[refIndex][bin] > cb.first) && (scanCounts[refIndex][bin] < cb.second)) ++gcbias[gcsum].sample;
+	      }
+	    }
 	  }
 	}
       }

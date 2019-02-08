@@ -35,6 +35,7 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include <htslib/faidx.h>
 
 #include "version.h"
+#include "scan.h"
 #include "util.h"
 
 
@@ -42,9 +43,11 @@ namespace coralns
 {
 
   struct CountDNAConfig {
+    uint32_t nchr;
     uint32_t meanisize;
     uint32_t window_size;
     uint32_t window_offset;
+    uint32_t scanWindow;
     uint16_t minQual;
     float exclgc;
     std::string sampleName;
@@ -80,17 +83,7 @@ namespace coralns
     faidx_t* faiRef = fai_load(c.genome.string().c_str());
     for(int32_t refIndex=0; refIndex < (int32_t) hdr->n_targets; ++refIndex) {
       ++show_progress;
-
-      // Check we have mapped reads on this chromosome
-      bool nodata = true;
-      std::string suffix("cram");
-      std::string str(c.bamFile.string());
-      if ((str.size() >= suffix.size()) && (str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0)) nodata = false;
-      uint64_t mapped = 0;
-      uint64_t unmapped = 0;
-      hts_idx_get_stat(idx, refIndex, &mapped, &unmapped);
-      if (mapped) nodata = false;
-      if (nodata) continue;
+      if (chrNoData(c, refIndex, idx)) continue;
 
       // Check presence in mappability map
       std::string tname(hdr->target_name[refIndex]);
@@ -239,7 +232,6 @@ namespace coralns
       ("help,?", "show help message")
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome file")
       ("sample,s", boost::program_options::value<std::string>(&c.sampleName)->default_value("NA12878"), "sample name")
-      ("percentile,p", boost::program_options::value<float>(&c.exclgc)->default_value(0.005), "exclude most extreme GC fraction")
       ("quality,q", boost::program_options::value<uint16_t>(&c.minQual)->default_value(10), "min. mapping quality")
       ("mappability,m", boost::program_options::value<boost::filesystem::path>(&c.mapFile), "input mappability map")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("cov.gz"), "coverage output file")
@@ -251,6 +243,12 @@ namespace coralns
       ("window-offset,j", boost::program_options::value<uint32_t>(&c.window_offset)->default_value(10000), "window offset")
       ;
 
+    boost::program_options::options_description gcopt("GC options");
+    gcopt.add_options()
+      ("scan-window,c", boost::program_options::value<uint32_t>(&c.scanWindow)->default_value(100000), "scanning window size")
+      ("percentile,p", boost::program_options::value<float>(&c.exclgc)->default_value(0.005), "exclude most extreme GC fraction")
+      ;      
+
     boost::program_options::options_description hidden("Hidden options");
     hidden.add_options()
       ("input-file", boost::program_options::value<boost::filesystem::path>(&c.bamFile), "input bam file")
@@ -261,9 +259,9 @@ namespace coralns
 
     // Set the visibility
     boost::program_options::options_description cmdline_options;
-    cmdline_options.add(generic).add(window).add(hidden);
+    cmdline_options.add(generic).add(window).add(gcopt).add(hidden);
     boost::program_options::options_description visible_options;
-    visible_options.add(generic).add(window);
+    visible_options.add(generic).add(window).add(gcopt);
 
     // Parse command-line
     boost::program_options::variables_map vm;
@@ -300,6 +298,7 @@ namespace coralns
 	std::cerr << "Fail to open header for " << c.bamFile.string() << std::endl;
 	return 1;
       }
+      c.nchr = hdr->n_targets;
 
       // Clean-up
       bam_hdr_destroy(hdr);
@@ -314,9 +313,16 @@ namespace coralns
     for(int i=0; i<argc; ++i) { std::cout << argv[i] << ' '; }
     std::cout << std::endl;
 
+    // Scan genomic windows
+    typedef std::vector<uint32_t> TWindowCounts;
+    typedef std::vector<TWindowCounts> TGenomicWindowCounts;
+    TGenomicWindowCounts scanCounts(c.nchr, TWindowCounts());
+    scan(c, scanCounts);
+    //for(uint32_t i = 0; i < c.nchr; ++i) { for(uint32_t k = 0; k < scanCounts[i].size(); ++k) { std::cerr << scanCounts[i][k] << std::endl;  }   }
+    
     // GC bias estimation
     std::vector<GcBias> gcbias(c.meanisize + 1, GcBias());
-    gcBias(c, gcbias);
+    gcBias(c, scanCounts, gcbias);
 
     // Correctable GC range
     typedef std::pair<uint32_t, uint32_t> TGCBound;
