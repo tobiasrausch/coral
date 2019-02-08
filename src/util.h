@@ -140,8 +140,9 @@ namespace coralns
     return (alignmentLength(rec) / 2);
   }
 
+  template<typename TConfig>
   inline std::pair<uint32_t, uint32_t>
-  estCountBounds(std::vector< std::vector<uint32_t> > const& scanCounts) {
+  estCountBounds(TConfig const& c, std::vector< std::vector<uint32_t> > const& scanCounts) {
     std::vector<uint32_t> all;
     for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) all.insert(all.end(), scanCounts[refIndex].begin(), scanCounts[refIndex].end());
     std::sort(all.begin(), all.end());
@@ -151,8 +152,8 @@ namespace coralns
     std::sort(absdev.begin(), absdev.end());
     uint32_t mad = absdev[absdev.size() / 2];
     uint32_t lowerBound = 0;
-    if (3 * mad < median) lowerBound = median - 3 * mad;
-    uint32_t upperBound = median + 3 * mad;
+    if (c.mad * mad < median) lowerBound = median - c.mad * mad;
+    uint32_t upperBound = median + c.mad * mad;
     return std::make_pair(lowerBound, upperBound);
   }
   
@@ -160,7 +161,7 @@ namespace coralns
   inline void
   getLibraryParams(TConfig const& c, std::vector< std::vector<uint32_t> > const& scanCounts, LibraryInfo& li) {
     typedef std::pair<uint32_t, uint32_t> TCountBounds;
-    TCountBounds cb = estCountBounds(scanCounts);
+    TCountBounds cb = estCountBounds(c, scanCounts);
     
     // Open file handles
     samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
@@ -253,9 +254,9 @@ namespace coralns
 	} else {
 	  li.median = median;
 	  li.mad = mad;
-	  li.maxNormalISize = median + (3 * mad);
+	  li.maxNormalISize = median + (c.mad * mad);
 	  li.minNormalISize = 0;
-	  if (3 * mad < median) li.minNormalISize = median - (3 * mad);
+	  if (c.mad * mad < median) li.minNormalISize = median - (c.mad * mad);
 	}
       }
     }

@@ -49,7 +49,9 @@ namespace coralns
     uint32_t window_offset;
     uint32_t scanWindow;
     uint16_t minQual;
+    uint16_t mad;
     float exclgc;
+    float alignmentQ;
     std::string sampleName;
     boost::filesystem::path genome;
     boost::filesystem::path mapFile;
@@ -245,7 +247,9 @@ namespace coralns
     boost::program_options::options_description gcopt("GC options");
     gcopt.add_options()
       ("scan-window,c", boost::program_options::value<uint32_t>(&c.scanWindow)->default_value(100000), "scanning window size")
-      ("percentile,p", boost::program_options::value<float>(&c.exclgc)->default_value(0.005), "exclude most extreme GC fraction")
+      ("mad-cutoff,d", boost::program_options::value<uint16_t>(&c.mad)->default_value(5), "median + 5 * mad count cutoff")
+      ("alignmentqual,a", boost::program_options::value<float>(&c.alignmentQ)->default_value(0), "alignment fractional identity (0:deactivate)")
+      ("percentile,p", boost::program_options::value<float>(&c.exclgc)->default_value(0.005), "excl. extreme GC fraction")
       ;      
 
     boost::program_options::options_description hidden("Hidden options");
