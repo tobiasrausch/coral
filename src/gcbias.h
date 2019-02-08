@@ -86,26 +86,9 @@ namespace coralns
     return std::make_pair(lowerBound, upperBound);
   }
 
-  inline std::pair<uint32_t, uint32_t>
-  estCountBounds(std::vector< std::vector<uint32_t> > const& scanCounts) {
-    std::vector<uint32_t> all;
-    for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) all.insert(all.end(), scanCounts[refIndex].begin(), scanCounts[refIndex].end());
-    std::sort(all.begin(), all.end());
-    uint32_t median = all[all.size() / 2];
-    std::vector<uint32_t> absdev;
-    for(uint32_t i = 0; i<all.size(); ++i) absdev.push_back(std::abs((int32_t) all[i] - (int32_t) median));
-    std::sort(absdev.begin(), absdev.end());
-    uint32_t mad = absdev[absdev.size() / 2];
-    uint32_t lowerBound = 0;
-    if (3 * mad < median) lowerBound = median - 3 * mad;
-    uint32_t upperBound = median + 3 * mad;
-    return std::make_pair(lowerBound, upperBound);
-  }
-  
-
   template<typename TConfig>
   inline void
-  gcBias(TConfig const& c, std::vector< std::vector<uint32_t> > const& scanCounts, std::vector<GcBias>& gcbias) {
+  gcBias(TConfig const& c, std::vector< std::vector<uint32_t> > const& scanCounts, LibraryInfo const& li, std::vector<GcBias>& gcbias) {
 
     typedef std::pair<uint32_t, uint32_t> TCountBounds;
     TCountBounds cb = estCountBounds(scanCounts);
@@ -125,6 +108,7 @@ namespace coralns
     faidx_t* faiRef = fai_load(c.genome.string().c_str());
     for (int refIndex = 0; refIndex < hdr->n_targets; ++refIndex) {
       ++show_progress;
+      if (scanCounts[refIndex].empty()) continue;
 
       // Check presence in mappability map
       std::string tname(hdr->target_name[refIndex]);
@@ -192,6 +176,7 @@ namespace coralns
       while (sam_itr_next(samfile, iter, rec) >= 0) {
 	if (rec->core.flag & (BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FSUPPLEMENTARY | BAM_FUNMAP)) continue;
 	if ((rec->core.flag & BAM_FPAIRED) && ((rec->core.flag & BAM_FMUNMAP) || (rec->core.tid != rec->core.mtid))) continue;
+	if ((rec->core.flag & BAM_FPAIRED) && (getLayout(rec->core) != 2)) continue;
 	if (rec->core.qual < c.minQual) continue;
 
 	if (rec->core.flag & BAM_FPAIRED) {
@@ -216,7 +201,7 @@ namespace coralns
 	
 	  // Insert size filter
 	  int32_t isize = (rec->core.pos + alignmentLength(rec)) - rec->core.mpos;
-	  if ((isize < 100) || (isize > 800)) continue;
+	  if ((isize <= li.minNormalISize) || (isize >= li.maxNormalISize)) continue;
 
 	  // Count fragment mid-points
 	  int32_t midPoint = rec->core.mpos + (int32_t) (isize/2);

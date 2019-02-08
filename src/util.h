@@ -22,6 +22,8 @@ Contact: Tobias Rausch (rausch@embl.de)
 #ifndef UTIL_H
 #define UTIL_H
 
+#include <boost/progress.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/unordered_map.hpp>
 #include <boost/algorithm/string.hpp>
 #include <boost/tokenizer.hpp>
@@ -43,6 +45,42 @@ Contact: Tobias Rausch (rausch@embl.de)
 namespace coralns
 {
 
+  struct LibraryInfo {
+    int32_t rs;
+    int32_t median;
+    int32_t mad;
+    int32_t minNormalISize;
+    int32_t maxNormalISize;
+
+    LibraryInfo() : rs(0), median(0), mad(0), minNormalISize(0), maxNormalISize(0) {}
+  };
+
+
+  template<typename TBamRecord>
+  inline uint8_t
+  getLayout(TBamRecord const& al) {
+    if (al.flag & BAM_FREAD1) {
+      if (!(al.flag & BAM_FREVERSE)) {
+	if (!(al.flag & BAM_FMREVERSE)) return 0;
+	else return (al.pos < al.mpos) ? 2 : 3;
+      } else {
+	if (!(al.flag & BAM_FMREVERSE)) return (al.pos > al.mpos) ? 2 : 3;
+	else return 1;
+      }
+    } else {
+      if (!(al.flag & BAM_FREVERSE)) {
+	if (!(al.flag & BAM_FMREVERSE)) return 0;
+	else return (al.pos < al.mpos) ? 2 : 3;
+      } else {
+	if (!(al.flag & BAM_FMREVERSE)) return (al.pos > al.mpos) ? 2 : 3;
+	else return 1;
+      }
+    }
+  }
+
+
+  
+  
   template<typename TConfig>
   inline bool
   chrNoData(TConfig const& c, uint32_t const refIndex, hts_idx_t const* idx) {
@@ -100,6 +138,132 @@ namespace coralns
 
   inline uint32_t halfAlignmentLength(bam1_t const* rec) {
     return (alignmentLength(rec) / 2);
+  }
+
+  inline std::pair<uint32_t, uint32_t>
+  estCountBounds(std::vector< std::vector<uint32_t> > const& scanCounts) {
+    std::vector<uint32_t> all;
+    for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) all.insert(all.end(), scanCounts[refIndex].begin(), scanCounts[refIndex].end());
+    std::sort(all.begin(), all.end());
+    uint32_t median = all[all.size() / 2];
+    std::vector<uint32_t> absdev;
+    for(uint32_t i = 0; i<all.size(); ++i) absdev.push_back(std::abs((int32_t) all[i] - (int32_t) median));
+    std::sort(absdev.begin(), absdev.end());
+    uint32_t mad = absdev[absdev.size() / 2];
+    uint32_t lowerBound = 0;
+    if (3 * mad < median) lowerBound = median - 3 * mad;
+    uint32_t upperBound = median + 3 * mad;
+    return std::make_pair(lowerBound, upperBound);
+  }
+  
+  template<typename TConfig>
+  inline void
+  getLibraryParams(TConfig const& c, std::vector< std::vector<uint32_t> > const& scanCounts, LibraryInfo& li) {
+    typedef std::pair<uint32_t, uint32_t> TCountBounds;
+    TCountBounds cb = estCountBounds(scanCounts);
+    
+    // Open file handles
+    samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
+    hts_set_fai_filename(samfile, c.genome.string().c_str());
+    hts_idx_t* idx = sam_index_load(samfile, c.bamFile.string().c_str());
+    bam_hdr_t* hdr = sam_hdr_read(samfile);
+
+    // Iterate all samples
+    uint32_t maxAlignmentsScreened=10000000;
+    uint32_t maxNumAlignments=1000000;
+    uint32_t minNumAlignments=1000;
+    uint32_t alignmentCount=0;
+    uint32_t processedNumPairs = 0;
+    uint32_t processedNumReads = 0;
+    uint32_t rplus = 0;
+    uint32_t nonrplus = 0;
+    typedef std::vector<uint32_t> TSizeVector;
+    TSizeVector vecISize;
+    TSizeVector readSize;
+
+    // Estimate lib params
+    boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Estimate library parameters" << std::endl;
+    boost::progress_display show_progress( hdr->n_targets );
+    
+    // Collect insert sizes
+    bool libCharacterized = false;
+    for(uint32_t refIndex=0; refIndex < (uint32_t) hdr->n_targets; ++refIndex) {
+      ++show_progress;
+      if (libCharacterized) continue;
+      if (scanCounts[refIndex].empty()) continue;
+      for(uint32_t kwin = 0; ((kwin < scanCounts[refIndex].size()) && (!libCharacterized)); ++kwin) {
+	if ((scanCounts[refIndex][kwin] > cb.first) && (scanCounts[refIndex][kwin] < cb.second)) {
+	  hts_itr_t* iter = sam_itr_queryi(idx, refIndex, kwin * c.scanWindow, ((kwin + 1) * c.scanWindow));
+	  bam1_t* rec = bam_init1();
+	  while (sam_itr_next(samfile, iter, rec) >= 0) {
+	    if (!(rec->core.flag & BAM_FREAD2) && (rec->core.l_qseq < 65000)) {
+	      if (rec->core.flag & (BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FSUPPLEMENTARY | BAM_FUNMAP)) continue;
+	      if ((alignmentCount > maxAlignmentsScreened) || ((processedNumReads >= maxNumAlignments) && (processedNumPairs == 0)) || (processedNumPairs >= maxNumAlignments)) {
+		  // Paired-end library with enough pairs
+		  libCharacterized = true;
+		  break;
+	      }
+	      ++alignmentCount;
+	      
+	      // Single-end
+	      if (processedNumReads < maxNumAlignments) {
+		readSize.push_back(rec->core.l_qseq);
+		++processedNumReads;
+	      }
+	      
+	      // Paired-end
+	      if ((rec->core.flag & BAM_FPAIRED) && !(rec->core.flag & BAM_FMUNMAP) && (rec->core.tid==rec->core.mtid)) {
+		if (processedNumPairs < maxNumAlignments) {
+		  vecISize.push_back(abs(rec->core.isize));
+		  if (getLayout(rec->core) == 2) ++rplus;
+		  else ++nonrplus;
+		  ++processedNumPairs;
+		}
+	      }
+	    }
+	  }
+	  bam_destroy1(rec);
+	  hts_itr_destroy(iter);
+	}
+      }
+    }
+    
+    // Get library parameters
+    if (processedNumReads >= minNumAlignments) {
+      std::sort(readSize.begin(), readSize.end());
+      li.rs = readSize[readSize.size() / 2];
+    }
+    int32_t median = 0;
+    int32_t mad = 0;
+    if (processedNumPairs >= minNumAlignments) {
+      std::sort(vecISize.begin(), vecISize.end());
+      median = vecISize[vecISize.size() / 2];
+      std::vector<uint32_t> absDev;
+      for(uint32_t i = 0; i < vecISize.size(); ++i) absDev.push_back(std::abs((int32_t) vecISize[i] - median));
+      std::sort(absDev.begin(), absDev.end());
+      mad = absDev[absDev.size() / 2];
+
+      // Get default library orientation
+      if ((median >= 50) && (median<=100000)) {
+	if (rplus < nonrplus) {
+	  std::cerr << "Warning: Sample has a non-default paired-end layout!" << std::endl;
+	  std::cerr << "The expected paired-end orientation is   ---Read1--->      <---Read2---  which is the default illumina paired-end layout." << std::endl;
+	    
+	} else {
+	  li.median = median;
+	  li.mad = mad;
+	  li.maxNormalISize = median + (3 * mad);
+	  li.minNormalISize = 0;
+	  if (3 * mad < median) li.minNormalISize = median - (3 * mad);
+	}
+      }
+    }
+
+    // Clean-up
+    bam_hdr_destroy(hdr);
+    hts_idx_destroy(idx);
+    sam_close(samfile);
   }
 
 }

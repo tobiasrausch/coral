@@ -69,7 +69,7 @@ namespace coralns
 
     // Parse BAM file
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "BAM file parsing" << std::endl;
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Count fragments" << std::endl;
     boost::progress_display show_progress( hdr->n_targets );
 
     // Open output file
@@ -224,7 +224,6 @@ namespace coralns
   
   int countReads(int argc, char **argv) {
     CountDNAConfig c;
-    c.meanisize = 357;
     
     // Parameter
     boost::program_options::options_description generic("Generic options");
@@ -319,10 +318,16 @@ namespace coralns
     TGenomicWindowCounts scanCounts(c.nchr, TWindowCounts());
     scan(c, scanCounts);
     //for(uint32_t i = 0; i < c.nchr; ++i) { for(uint32_t k = 0; k < scanCounts[i].size(); ++k) { std::cerr << scanCounts[i][k] << std::endl;  }   }
-    
+
+    // Estimate library parameters
+    LibraryInfo li;
+    getLibraryParams(c, scanCounts, li);
+    c.meanisize = ((int32_t) (li.median / 2)) * 2 + 1;
+    //std::cerr << li.rs << ',' << li.median << ',' << li.mad << ',' << li.minNormalISize << ',' << li.maxNormalISize << std::endl;
+
     // GC bias estimation
     std::vector<GcBias> gcbias(c.meanisize + 1, GcBias());
-    gcBias(c, scanCounts, gcbias);
+    gcBias(c, scanCounts, li, gcbias);
 
     // Correctable GC range
     typedef std::pair<uint32_t, uint32_t> TGCBound;
