@@ -30,7 +30,7 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include <boost/math/distributions/hypergeometric.hpp>
 
 
-namespace sc
+namespace cybrarian
 {
 
   inline bool

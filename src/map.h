@@ -38,7 +38,7 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include "util.h"
 
 
-namespace sc
+namespace cybrarian
 {
 
   struct CountDNAConfig {
@@ -46,6 +46,7 @@ namespace sc
     uint32_t window_size;
     uint32_t window_offset;
     uint16_t minQual;
+    float exclgc;
     std::string sampleName;
     boost::filesystem::path genome;
     boost::filesystem::path mapFile;
@@ -55,7 +56,7 @@ namespace sc
 
   template<typename TConfig>
   inline int32_t
-  bamCount(TConfig const& c) {
+  bamCount(TConfig const& c, std::vector<GcBias> const& gcbias, std::pair<uint32_t, uint32_t> const& gcbound) {
     
     // Load bam file
     samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
@@ -72,7 +73,7 @@ namespace sc
     boost::iostreams::filtering_ostream dataOut;
     dataOut.push(boost::iostreams::gzip_compressor());
     dataOut.push(boost::iostreams::file_sink(c.outfile.string().c_str(), std::ios_base::out | std::ios_base::binary));
-    dataOut << "chr\tstart\tend\t" << c.sampleName << "\tuniq\tgc" << std::endl;
+    dataOut << "chr\tstart\tend\t" << c.sampleName << std::endl;
     
     // Iterate chromosomes
     faidx_t* faiMap = fai_load(c.mapFile.string().c_str());
@@ -104,20 +105,44 @@ namespace sc
       else seqlen = -1;
       char* ref = faidx_fetch_seq(faiRef, tname.c_str(), 0, faidx_seq_len(faiRef, tname.c_str()), &seqlen);
 
-      // Mappability
-      typedef boost::dynamic_bitset<> TBitSet;
-      TBitSet uniq(hdr->target_len[refIndex], false);
-      for(uint32_t i = 0; i < hdr->target_len[refIndex]; ++i) {
-	if (seq[i] == 'C') uniq[i] = 1;
-      }
+      // Get GC and Mappability
+      std::vector<uint16_t> uniqContent(hdr->target_len[refIndex], 0);
+      std::vector<uint16_t> gcContent(hdr->target_len[refIndex], 0);
+      {
+	// Mappability map
+	typedef boost::dynamic_bitset<> TBitSet;
+	TBitSet uniq(hdr->target_len[refIndex], false);
+	for(uint32_t i = 0; i < hdr->target_len[refIndex]; ++i) {
+	  if (seq[i] == 'C') uniq[i] = 1;
+	}
 
-      // Get GC- and N-content
-      typedef boost::dynamic_bitset<> TBitSet;
-      TBitSet gcref(hdr->target_len[refIndex], false);
-      for(uint32_t i = 0; i < hdr->target_len[refIndex]; ++i) {
-	if ((ref[i] == 'c') || (ref[i] == 'C') || (ref[i] == 'g') || (ref[i] == 'G')) gcref[i] = 1;
+	// GC map
+	typedef boost::dynamic_bitset<> TBitSet;
+	TBitSet gcref(hdr->target_len[refIndex], false);
+	for(uint32_t i = 0; i < hdr->target_len[refIndex]; ++i) {
+	  if ((ref[i] == 'c') || (ref[i] == 'C') || (ref[i] == 'g') || (ref[i] == 'G')) gcref[i] = 1;
+	}
+
+	// Sum across fragments
+	int32_t halfwin = (int32_t) (c.meanisize / 2);
+	int32_t usum = 0;
+	int32_t gcsum = 0;
+	for(int32_t pos = halfwin; pos < (int32_t) hdr->target_len[refIndex] - halfwin; ++pos) {
+	  if (pos == halfwin) {
+	    for(int32_t i = pos - halfwin; i<=pos+halfwin; ++i) {
+	      usum += uniq[i];
+	      gcsum += gcref[i];
+	    }
+	  } else {
+	    usum -= uniq[pos - halfwin - 1];
+	    gcsum -= gcref[pos - halfwin - 1];
+	    usum += uniq[pos + halfwin];
+	    gcsum += gcref[pos + halfwin];
+	  }
+	  gcContent[pos] = gcsum;
+	  uniqContent[pos] = usum;
+	}
       }
-    
       
       // Coverage track
       typedef uint16_t TCount;
@@ -173,20 +198,20 @@ namespace sc
 
       for(uint32_t start = 0; start < hdr->target_len[refIndex]; start = start + c.window_offset) {
 	if (start + c.window_size < hdr->target_len[refIndex]) {
-	  int32_t covsum = 0;
-	  int32_t uniqsum = 0;
-	  int32_t gcsum = 0;
+	  double covsum = 0;
+	  double obsexp = 0;
+	  int32_t winlen = 0;
 	  for(uint32_t pos = start; pos < start + c.window_size; ++pos) {
-	    if (uniq[pos]) {
+	    if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] == c.meanisize)) {
 	      covsum += cov[pos];
-	      uniqsum += uniq[pos];
-	      gcsum += gcref[pos];
+	      obsexp += gcbias[gcContent[pos]].obsexp;
+	      ++winlen;
 	    }
 	  }
-	  if (2 * uniqsum > c.window_size) {
-	    double count = covsum * (double) c.window_size / (double) uniqsum;
-	    double gcContent = (double) gcsum / (double) uniqsum;
-	    dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (start + c.window_size) << "\t" << count << "\t" << uniqsum << "\t" << gcContent << std::endl;
+	  if (2 * winlen > c.window_size) {
+	    obsexp /= (double) winlen;
+	    double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
+	    dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (start + c.window_size) << "\t" << count << std::endl;
 	  }
 	}
       }
@@ -214,6 +239,7 @@ namespace sc
       ("help,?", "show help message")
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome file")
       ("sample,s", boost::program_options::value<std::string>(&c.sampleName)->default_value("NA12878"), "sample name")
+      ("percentile,p", boost::program_options::value<float>(&c.exclgc)->default_value(0.005), "exclude most extreme GC fraction")
       ("quality,q", boost::program_options::value<uint16_t>(&c.minQual)->default_value(10), "min. mapping quality")
       ("mappability,m", boost::program_options::value<boost::filesystem::path>(&c.mapFile), "input mappability map")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("cov.gz"), "coverage output file")
@@ -288,8 +314,17 @@ namespace sc
     for(int i=0; i<argc; ++i) { std::cout << argv[i] << ' '; }
     std::cout << std::endl;
 
-    gcBias(c);
-    return bamCount(c);
+    // GC bias estimation
+    std::vector<GcBias> gcbias(c.meanisize + 1, GcBias());
+    gcBias(c, gcbias);
+
+    // Correctable GC range
+    typedef std::pair<uint32_t, uint32_t> TGCBound;
+    TGCBound gcbound = gcBound(c, gcbias);
+    //std::cerr << gcbound.first << "," << gcbound.second << std::endl;
+
+    // Count reads
+    return bamCount(c, gcbias, gcbound);
   }
 
   

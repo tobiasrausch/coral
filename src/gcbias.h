@@ -1,9 +1,7 @@
 /*
 ============================================================================
-Single Cell Sequencing Analysis Methods
+Cybrarian: CopY-numBeR vARIAtiaN discovery
 ============================================================================
-Copyright (C) 2018 Tobias Rausch
-
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
 the Free Software Foundation, either version 3 of the License, or
@@ -21,16 +19,9 @@ Contact: Tobias Rausch (rausch@embl.de)
 ============================================================================
 */
 
-#ifndef COUNT_H
-#define COUNT_H
+#ifndef GCBIAS_H
+#define GCBIAS_H
 
-#define _SECURE_SCL 0
-#define _SCL_SECURE_NO_WARNINGS
-#include <iostream>
-#include <vector>
-#include <fstream>
-
-#define BOOST_DISABLE_ASSERTS
 #include <boost/unordered_map.hpp>
 #include <boost/program_options/cmdline.hpp>
 #include <boost/program_options/options_description.hpp>
@@ -51,24 +42,62 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include "json.h"
 #include "tsv.h"
 
-namespace sc
+namespace cybrarian
 {
+  struct GcBias {
+    int32_t sample;
+    int32_t reference;
+    double fractionSample;
+    double fractionReference;
+    double percentileSample;
+    double percentileReference;
+    double obsexp;
+
+    GcBias() : sample(0), reference(0), fractionSample(0), fractionReference(0), percentileSample(0), percentileReference(0), obsexp(0) {}
+  };
+
+  template<typename TConfig>
+  inline std::pair<uint32_t, uint32_t>
+  gcBound(TConfig const& c, std::vector<GcBias>& gcbias) {
+    uint32_t lowerBound = 0;
+    uint32_t upperBound = gcbias.size();
+    for(uint32_t i = 0; i < gcbias.size(); ++i) {
+      if ((gcbias[i].percentileSample < c.exclgc) || (gcbias[i].percentileReference < c.exclgc)) lowerBound = i;
+      if ((gcbias[i].percentileSample + c.exclgc > 1) || (gcbias[i].percentileReference + c.exclgc > 1)) {
+	if (i < upperBound) upperBound = i;
+      }
+    }
+    if (lowerBound >= upperBound) upperBound = lowerBound + 1;
+    /*
+    // Adjust total
+    uint64_t totalSampleCount = 0;
+    uint64_t totalReferenceCount = 0;
+    for(uint32_t i = lowerBound + 1; i < upperBound; ++i) {
+      totalSampleCount += gcbias[i].sample;
+      totalReferenceCount += gcbias[i].reference;
+    }    
+    // Re-estimate observed/expected
+    for(uint32_t i = lowerBound + 1; i < upperBound; ++i) {
+      gcbias[i].fractionSample = (double) gcbias[i].sample / (double) totalSampleCount;
+      gcbias[i].fractionReference = (double) gcbias[i].reference / (double) totalReferenceCount;
+      gcbias[i].obsexp = 1;
+      if (gcbias[i].fractionReference > 0) gcbias[i].obsexp = gcbias[i].fractionSample / gcbias[i].fractionReference;
+    }
+    */
+    
+    return std::make_pair(lowerBound, upperBound);
+  }
+  
 
   template<typename TConfig>
   inline void
-  gcBias(TConfig const& c) {
-    int32_t halfwin = (int32_t) (c.meanisize / 2);
-	
+  gcBias(TConfig const& c, std::vector<GcBias>& gcbias) {
     // Load bam file
     samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
     hts_idx_t* idx = sam_index_load(samfile, c.bamFile.string().c_str());
     bam_hdr_t* hdr = sam_hdr_read(samfile);
 
-    // GC-Bias
-    std::vector<int32_t> gcbias(c.meanisize + 1, 0);
-    std::vector<int32_t> refbias(c.meanisize + 1, 0);
-    
     // Parse bam (contig by contig)
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "BAM file parsing" << std::endl;
@@ -107,6 +136,7 @@ namespace sc
       }
 
       // Reference GC
+      int32_t halfwin = (int32_t) (c.meanisize / 2);	
       if (tname == "chr20") {
 	int32_t usum = 0;
 	int32_t gcsum = 0;
@@ -125,7 +155,8 @@ namespace sc
 	  //std::string refslice = boost::to_upper_copy(std::string(ref + pos - halfwin, ref + pos + halfwin + 1));
 	  //std::cerr << refslice << ',' << c.meanisize << ',' << gcsum << ',' << usum << std::endl;
 	  if (usum == c.meanisize) {
-	    if ((pos >= 35000000) && (pos < 60000000)) ++refbias[gcsum];
+	    //if ((pos >= 35000000) && (pos < 60000000))
+	    ++gcbias[gcsum].reference;
 	  }
 	}
       }
@@ -181,7 +212,7 @@ namespace sc
 	    }
 	    //std::string refslice = boost::to_upper_copy(std::string(ref + fragstart, ref + fragend));
 	    //std::cerr << refslice << ',' << c.meanisize << ',' << gcsum << ',' << usum << std::endl;
-	    if (usum == c.meanisize) ++gcbias[gcsum];
+	    if (usum == c.meanisize) ++gcbias[gcsum].sample;
 	  }
 	}
       }
@@ -191,17 +222,34 @@ namespace sc
       if (ref != NULL) free(ref);
     }
 
+    // Determine percentiles
+    uint64_t totalSampleCount = 0;
+    uint64_t totalReferenceCount = 0;
+    for(uint32_t i = 0; i < gcbias.size(); ++i) {
+      totalSampleCount += gcbias[i].sample;
+      totalReferenceCount += gcbias[i].reference;
+    }
+    uint64_t cumSample = 0;
+    uint64_t cumReference = 0;
+    for(uint32_t i = 0; i < gcbias.size(); ++i) {
+      cumSample += gcbias[i].sample;
+      cumReference += gcbias[i].reference;
+      gcbias[i].fractionSample = (double) gcbias[i].sample / (double) totalSampleCount;
+      gcbias[i].fractionReference = (double) gcbias[i].reference / (double) totalReferenceCount;
+      gcbias[i].percentileSample = (double) cumSample / (double) totalSampleCount;
+      gcbias[i].percentileReference = (double) cumReference / (double) totalReferenceCount;
+      gcbias[i].obsexp = 1;
+      if (gcbias[i].fractionReference > 0) gcbias[i].obsexp = gcbias[i].fractionSample / gcbias[i].fractionReference;
+    }
+      
     // Output GC-bias
-    for(uint32_t i = 0; i < gcbias.size(); ++i) std::cerr << i << "\t" << gcbias[i] << "\tSample" << std::endl;
-    for(uint32_t i = 0; i < refbias.size(); ++i) std::cerr << i << "\t" << refbias[i] << "\tReference" << std::endl;
+    //for(uint32_t i = 0; i < gcbias.size(); ++i) std::cerr << i << "\t(" << gcbias[i].sample << "," << gcbias[i].reference << ")\t(" << gcbias[i].percentileSample << "," << gcbias[i].percentileReference << ")\t(" << gcbias[i].fractionSample << "," << gcbias[i].fractionReference << ")\t" << gcbias[i].obsexp << std::endl;
 
     fai_destroy(faiRef);
     fai_destroy(faiMap);
     hts_idx_destroy(idx);
     sam_close(samfile);
     bam_hdr_destroy(hdr);
-
-    exit(-1);
   }
 
 }

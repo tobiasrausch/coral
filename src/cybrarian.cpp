@@ -33,10 +33,10 @@ Contact: Tobias Rausch (rausch@embl.de)
 #endif
 
 #include "version.h"
-#include "count.h"
+#include "gcbias.h"
 #include "map.h"
 
-using namespace sc;
+using namespace cybrarian;
 
 
 inline void

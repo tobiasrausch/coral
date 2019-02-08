@@ -38,7 +38,7 @@ HTSLIBSOURCES = $(wildcard src/htslib/*.c) $(wildcard src/htslib/*.h)
 SOURCES = $(wildcard src/*.h) $(wildcard src/*.cpp)
 
 # Targets
-BUILT_PROGRAMS = src/sc
+BUILT_PROGRAMS = src/cybrarian
 TARGETS = ${SUBMODULES} ${BUILT_PROGRAMS}
 
 all:   	$(TARGETS)
@@ -46,7 +46,7 @@ all:   	$(TARGETS)
 .htslib: $(HTSLIBSOURCES)
 	if [ -r src/htslib/Makefile ]; then cd src/htslib && make && make lib-static && cd ../../ && touch .htslib; fi
 
-src/sc: ${SUBMODULES} $(SOURCES)
+src/cybrarian: ${SUBMODULES} $(SOURCES)
 	$(CXX) $(CXXFLAGS) $@.cpp -o $@ $(LDFLAGS)
 
 install: ${BUILT_PROGRAMS}

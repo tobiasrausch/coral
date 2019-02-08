@@ -24,7 +24,7 @@ Contact: Tobias Rausch (rausch@embl.de)
 #ifndef VERSION_H
 #define VERSION_H
 
-namespace sc
+namespace cybrarian
 {
 
 
