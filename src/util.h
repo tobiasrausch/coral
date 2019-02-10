@@ -78,7 +78,24 @@ namespace coralns
     }
   }
 
-
+  inline uint32_t
+  setMinChrLen(bam_hdr_t const* hdr, double const xx) {
+    uint32_t minChrLen = 0;
+    std::vector<uint32_t> chrlen(hdr->n_targets, 0);
+    uint64_t genomelen = 0;
+    for(int32_t refIndex = 0; refIndex < hdr->n_targets; ++refIndex) {
+      chrlen[refIndex] = hdr->target_len[refIndex];
+      genomelen += hdr->target_len[refIndex];
+    }
+    std::sort(chrlen.begin(), chrlen.end(), std::greater<uint32_t>());
+    uint64_t cumsum = 0;
+    for(uint32_t i = 0; i < chrlen.size(); ++i) {
+      cumsum += chrlen[i];
+      minChrLen = chrlen[i];
+      if (cumsum > genomelen * xx) break;
+    }
+    return minChrLen;
+  }
   
   
   template<typename TConfig>

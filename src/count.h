@@ -48,6 +48,7 @@ namespace coralns
     uint32_t window_size;
     uint32_t window_offset;
     uint32_t scanWindow;
+    uint32_t minChrLen;
     uint16_t minQual;
     uint16_t mad;
     float exclgc;
@@ -302,6 +303,7 @@ namespace coralns
 	return 1;
       }
       c.nchr = hdr->n_targets;
+      c.minChrLen = setMinChrLen(hdr, 0.95);
 
       // Clean-up
       bam_hdr_destroy(hdr);
@@ -312,7 +314,7 @@ namespace coralns
     // Show cmd
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] ";
-    std::cout << "sc ";
+    std::cout << "coral ";
     for(int i=0; i<argc; ++i) { std::cout << argv[i] << ' '; }
     std::cout << std::endl;
 

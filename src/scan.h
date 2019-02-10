@@ -59,6 +59,10 @@ namespace coralns
     for(int32_t refIndex=0; refIndex < (int32_t) hdr->n_targets; ++refIndex) {
       ++show_progress;
       if (chrNoData(c, refIndex, idx)) continue;
+      // Exclude small chromosomes
+      if (hdr->target_len[refIndex] < c.minChrLen) continue;
+      // Exclude sex chromosomes
+      if ((std::string(hdr->target_name[refIndex]) == "chrX") || (std::string(hdr->target_name[refIndex]) == "chrY") || (std::string(hdr->target_name[refIndex]) == "X") || (std::string(hdr->target_name[refIndex]) == "Y")) continue;
 
       // Coverage track
       typedef uint16_t TCount;
