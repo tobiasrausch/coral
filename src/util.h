@@ -22,6 +22,8 @@ Contact: Tobias Rausch (rausch@embl.de)
 #ifndef UTIL_H
 #define UTIL_H
 
+#include <boost/filesystem.hpp>
+#include <boost/multi_array.hpp>
 #include <boost/progress.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/unordered_map.hpp>
@@ -40,7 +42,8 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include <htslib/vcf.h>
 #include <htslib/sam.h>
 
-
+#include "matrix.h"
+#include "gflars.h"
 
 namespace coralns
 {
@@ -65,6 +68,133 @@ namespace coralns
   };
 
 
+  struct SegmentConfig {
+    typedef double TPrecision;
+    typedef boost::multi_array<TPrecision, 2> TSignalMatrix;
+    
+    uint32_t k;
+    double epsilon;
+    double dpthreshold;
+    std::string outprefix;
+    boost::filesystem::path signal;
+  };
+
+  
+  struct Interval {
+    uint32_t istart;
+    uint32_t iend;
+    
+    Interval() : istart(0), iend(0) {}
+    Interval(uint32_t a, uint32_t b) : istart(a), iend(b) {}
+  };  
+  
+  struct NormalizedBinCounts {
+    typedef SegmentConfig::TSignalMatrix TSignalMatrix;
+    typedef std::vector<Interval> TIntervals;
+    std::string chr;
+    uint32_t rows;
+    uint32_t cols;
+    TIntervals itv;
+    TSignalMatrix sm;
+    
+    NormalizedBinCounts() : chr(""), rows(0), cols(0) {}
+  };
+
+
+  struct SmoothSignal {
+    typedef Recap::TPrecision TPrecision;
+    typedef std::vector<uint32_t> TIndexVector;
+    typedef boost::multi_array<TPrecision, 2> TSignalMatrix;
+
+    TIndexVector jumps;
+    TSignalMatrix smooth;
+    TSignalMatrix updown;
+  };
+  
+  template<typename TSignalMatrix>
+  inline void
+  smoothsignal(TSignalMatrix const& sm, std::vector<uint32_t> const& jumps, SmoothSignal& res) {
+    typedef Recap::TPrecision TPrecision;
+    uint32_t nrow = sm.shape()[0];
+    uint32_t ncol = sm.shape()[1];
+    
+    std::vector<int32_t> b(jumps.begin(), jumps.end());
+    b.push_back(-1);
+    b.push_back(nrow-1);
+    std::sort(b.begin(), b.end());
+
+    res.jumps.clear();
+    for(uint32_t i = 1; i < b.size(); ++i) res.jumps.push_back(b[i]);
+    uint32_t k = res.jumps.size();
+    res.smooth.resize(boost::extents[k][ncol]);
+    for(uint32_t i = 0; i < k; ++i) {
+      uint32_t istart = b[i] + 1;
+      uint32_t iend = b[i+1] + 1;
+      for(uint32_t j = 0; j < ncol; ++j) {
+	TPrecision avg = 0;
+	for(uint32_t ki = istart; ki<iend; ++ki) avg += sm[ki][j];
+	avg /= (TPrecision) (iend - istart);
+	res.smooth[i][j] = avg;
+      }
+    }
+  }
+
+  inline void
+  updown(SmoothSignal& res) {
+    typedef Recap::TPrecision TPrecision;
+    uint32_t nrow = res.smooth.shape()[0];
+    uint32_t ncol = res.smooth.shape()[1];
+    res.updown.resize(boost::extents[nrow][2]);
+    for(uint32_t i = 0; i<nrow; ++i) {
+      uint32_t upcount = 0;
+      TPrecision up = 0;
+      uint32_t downcount = 0;
+      TPrecision down = 0;
+      for(uint32_t j = 0; j<ncol; ++j) {
+	if (res.smooth[i][j] > 0) {
+	  up += res.smooth[i][j];
+	  ++upcount;
+	} else if (res.smooth[i][j] < 0) {
+	  down += res.smooth[i][j];
+	  ++downcount;
+	}
+      }
+      if (upcount) res.updown[i][0] = up / (TPrecision) upcount;
+      else res.updown[i][0] = 0;
+      if (downcount) res.updown[i][1] = down / (TPrecision) downcount;
+      else res.updown[i][1] = 0;
+    }
+  }
+
+  template<typename TSignalMatrix>
+  inline void
+  expandpiecewiseconstant(std::vector<uint32_t> const& jumps, TSignalMatrix const& val, TSignalMatrix& res) {
+    uint32_t ncol = val.shape()[1];
+    
+    std::vector<int32_t> b(jumps.begin(), jumps.end());
+    b.push_back(-1);
+    std::sort(b.begin(), b.end());
+
+    res.resize(boost::extents[b[b.size()-1]+1][ncol]);
+    for(uint32_t i = 0; i<jumps.size(); ++i) {
+      uint32_t istart = b[i] + 1;
+      uint32_t iend = b[i+1] + 1;
+      for(uint32_t j = 0; j < ncol; ++j)
+	for(uint32_t ki = istart; ki<iend; ++ki) res[ki][j] = val[i][j];
+    }
+  }
+
+  template<typename TVector>
+  inline double
+  _medianMutVector(TVector& n) {
+    if (!n.empty()) {
+      std::size_t s = n.size();
+      std::sort(n.begin(), n.end());
+      if (s % 2 == 0) return (n[s/2 - 1] + n[s/2]) / 2;
+      else return n[s/2];
+    } else return 0;
+  }
+      
   template<typename TBamRecord>
   inline uint8_t
   getLayout(TBamRecord const& al) {

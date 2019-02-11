@@ -38,7 +38,7 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include "util.h"
 #include "gcbias.h"
 #include "count.h"
-
+#include "segment.h"
 
 using namespace coralns;
 
@@ -50,6 +50,7 @@ displayUsage() {
   std::cout << "Commands:" << std::endl;
   std::cout << std::endl;
   std::cout << "    count        count reads" << std::endl;
+  std::cout << "    segment      segment coverage" << std::endl;
   std::cout << std::endl;
   std::cout << std::endl;
 }
@@ -80,6 +81,9 @@ int main(int argc, char **argv) {
   }
   else if ((std::string(argv[1]) == "count")) {
     return countReads(argc-1,argv+1);
+  }
+  else if ((std::string(argv[1]) == "segment")) {
+    return segment(argc-1,argv+1);
   } else {
     std::cerr << "Unrecognized command " << std::string(argv[1]) << std::endl;
     return 1;
