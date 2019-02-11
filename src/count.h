@@ -248,7 +248,7 @@ namespace coralns
       ("help,?", "show help message")
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome file")
       ("sample,s", boost::program_options::value<std::string>(&c.sampleName)->default_value("NA12878"), "sample name")
-      ("quality,q", boost::program_options::value<uint16_t>(&c.minQual)->default_value(10), "min. mapping quality")
+      ("quality,q", boost::program_options::value<uint16_t>(&c.minQual)->default_value(0), "min. mapping quality")
       ("mappability,m", boost::program_options::value<boost::filesystem::path>(&c.mapFile), "input mappability map")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("cov.gz"), "coverage output file")
       ;
@@ -261,10 +261,10 @@ namespace coralns
 
     boost::program_options::options_description gcopt("GC options");
     gcopt.add_options()
-      ("scan-window,c", boost::program_options::value<uint32_t>(&c.scanWindow)->default_value(100000), "scanning window size")
+      ("scan-window,c", boost::program_options::value<uint32_t>(&c.scanWindow)->default_value(10000), "scanning window size")
       ("mad-cutoff,d", boost::program_options::value<uint16_t>(&c.mad)->default_value(5), "median + 5 * mad count cutoff")
       ("alignmentqual,a", boost::program_options::value<float>(&c.alignmentQ)->default_value(0), "alignment fractional identity (0:deactivate)")
-      ("percentile,p", boost::program_options::value<float>(&c.exclgc)->default_value(0.005), "excl. extreme GC fraction")
+      ("percentile,p", boost::program_options::value<float>(&c.exclgc)->default_value(0.001), "excl. extreme GC fraction")
       ;      
 
     boost::program_options::options_description hidden("Hidden options");
