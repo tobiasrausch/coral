@@ -62,7 +62,7 @@ namespace coralns
 
   template<typename TConfig>
   inline int32_t
-  bamCount(TConfig const& c, std::vector<GcBias> const& gcbias, std::pair<uint32_t, uint32_t> const& gcbound) {
+  bamCount(TConfig const& c, LibraryInfo const& li, std::vector<GcBias> const& gcbias, std::pair<uint32_t, uint32_t> const& gcbound) {
     
     // Load bam file
     samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
@@ -180,10 +180,19 @@ namespace coralns
 	    if ((mateMap.find(hv) == mateMap.end()) || (!mateMap[hv])) continue; // Mate discarded
 	    mateMap[hv] = false;
 	  }
+
+	  // Insert size filter
+	  int32_t isize = (rec->core.pos + alignmentLength(rec)) - rec->core.mpos;
+	  if ((li.minNormalISize < isize) && (isize < li.maxNormalISize)) {
+	    midPoint = rec->core.mpos + (int32_t) (isize/2);
+	  } else {
+	    if (rec->core.flag & BAM_FREVERSE) midPoint = rec->core.pos - (c.meanisize / 2);
+	    else midPoint = rec->core.pos + (c.meanisize / 2);
+	  }
 	}
 
 	// Count fragment
-	if ((midPoint < (int32_t) hdr->target_len[refIndex]) && (cov[midPoint] < maxCoverage - 1)) ++cov[midPoint];
+	if ((midPoint >= 0) && (midPoint < (int32_t) hdr->target_len[refIndex]) && (cov[midPoint] < maxCoverage - 1)) ++cov[midPoint];
       }
       // Clean-up
       if (seq != NULL) free(seq);
@@ -195,19 +204,22 @@ namespace coralns
       for(uint32_t start = 0; start < hdr->target_len[refIndex]; start = start + c.window_offset) {
 	if (start + c.window_size < hdr->target_len[refIndex]) {
 	  double covsum = 0;
+	  double expcov = 0;
 	  double obsexp = 0;
 	  int32_t winlen = 0;
 	  for(uint32_t pos = start; pos < start + c.window_size; ++pos) {
 	    if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] == c.meanisize)) {
 	      covsum += cov[pos];
 	      obsexp += gcbias[gcContent[pos]].obsexp;
+	      expcov += gcbias[gcContent[pos]].coverage;
 	      ++winlen;
 	    }
 	  }
 	  if (2 * winlen > c.window_size) {
 	    obsexp /= (double) winlen;
 	    double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
-	    dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (start + c.window_size) << "\t" << count << std::endl;
+	    double cn = 2 * covsum / expcov;
+	    dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (start + c.window_size) << "\t" << cn << std::endl;
 	  }
 	}
       }
@@ -341,7 +353,7 @@ namespace coralns
     //std::cerr << gcbound.first << "," << gcbound.second << std::endl;
 
     // Count reads
-    return bamCount(c, gcbias, gcbound);
+    return bamCount(c, li, gcbias, gcbound);
   }
 
   

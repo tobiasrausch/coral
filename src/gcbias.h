@@ -50,6 +50,7 @@ namespace coralns
     double percentileSample;
     double percentileReference;
     double obsexp;
+    double coverage;
 
     GcBias() : sample(0), reference(0), fractionSample(0), fractionReference(0), percentileSample(0), percentileReference(0), obsexp(0) {}
   };
@@ -174,47 +175,51 @@ namespace coralns
       else seqlen = -1;
       char* ref = faidx_fetch_seq(faiRef, tname.c_str(), 0, faidx_seq_len(faiRef, tname.c_str()), &seqlen);
 
-      // Mappability
-      typedef boost::dynamic_bitset<> TBitSet;
-      TBitSet uniq(hdr->target_len[refIndex], false);
-      for(uint32_t i = 0; i < hdr->target_len[refIndex]; ++i) {
-	if (seq[i] == 'C') uniq[i] = 1;
-      }
-
-      // Get GC- and N-content
-      typedef boost::dynamic_bitset<> TBitSet;
-      TBitSet gcref(hdr->target_len[refIndex], false);
-      for(uint32_t i = 0; i < hdr->target_len[refIndex]; ++i) {
-	if ((ref[i] == 'c') || (ref[i] == 'C') || (ref[i] == 'g') || (ref[i] == 'G')) gcref[i] = 1;
-      }
-
-      // Reference GC
-      int32_t halfwin = (int32_t) (c.meanisize / 2);	
-      int32_t usum = 0;
-      int32_t gcsum = 0;
-      for(int32_t pos = halfwin; pos < (int32_t) hdr->target_len[refIndex] - halfwin; ++pos) {
-	if (pos == halfwin) {
-	  for(int32_t i = pos - halfwin; i<=pos+halfwin; ++i) {
-	    usum += uniq[i];
-	    gcsum += gcref[i];
-	  }
-	} else {
-	  usum -= uniq[pos - halfwin - 1];
-	  gcsum -= gcref[pos - halfwin - 1];
-	  usum += uniq[pos + halfwin];
-	  gcsum += gcref[pos + halfwin];
+      // Get GC and Mappability
+      std::vector<uint16_t> uniqContent(hdr->target_len[refIndex], 0);
+      std::vector<uint16_t> gcContent(hdr->target_len[refIndex], 0);
+      {
+	// Mappability map
+	typedef boost::dynamic_bitset<> TBitSet;
+	TBitSet uniq(hdr->target_len[refIndex], false);
+	for(uint32_t i = 0; i < hdr->target_len[refIndex]; ++i) {
+	  if (seq[i] == 'C') uniq[i] = 1;
 	}
-	//std::string refslice = boost::to_upper_copy(std::string(ref + pos - halfwin, ref + pos + halfwin + 1));
-	//std::cerr << refslice << ',' << c.meanisize << ',' << gcsum << ',' << usum << std::endl;
-	if (usum == c.meanisize) {
-	  // Valid bin?
-	  uint32_t bin = pos / c.scanWindow;
-	  if (bin < scanCounts[refIndex].size()) {
-	    if ((scanCounts[refIndex][bin] > cb.first) && (scanCounts[refIndex][bin] < cb.second)) ++gcbias[gcsum].reference;
+
+	// GC map
+	typedef boost::dynamic_bitset<> TBitSet;
+	TBitSet gcref(hdr->target_len[refIndex], false);
+	for(uint32_t i = 0; i < hdr->target_len[refIndex]; ++i) {
+	  if ((ref[i] == 'c') || (ref[i] == 'C') || (ref[i] == 'g') || (ref[i] == 'G')) gcref[i] = 1;
+	}
+
+	// Sum across fragments
+	int32_t halfwin = (int32_t) (c.meanisize / 2);
+	int32_t usum = 0;
+	int32_t gcsum = 0;
+	for(int32_t pos = halfwin; pos < (int32_t) hdr->target_len[refIndex] - halfwin; ++pos) {
+	  if (pos == halfwin) {
+	    for(int32_t i = pos - halfwin; i<=pos+halfwin; ++i) {
+	      usum += uniq[i];
+	      gcsum += gcref[i];
+	    }
+	  } else {
+	    usum -= uniq[pos - halfwin - 1];
+	    gcsum -= gcref[pos - halfwin - 1];
+	    usum += uniq[pos + halfwin];
+	    gcsum += gcref[pos + halfwin];
 	  }
+	  gcContent[pos] = gcsum;
+	  uniqContent[pos] = usum;
 	}
       }
 
+      // Coverage track
+      typedef uint16_t TCount;
+      uint32_t maxCoverage = std::numeric_limits<TCount>::max();
+      typedef std::vector<TCount> TCoverage;
+      TCoverage cov(hdr->target_len[refIndex], 0);
+      
       // Mate map
       typedef boost::unordered_map<std::size_t, bool> TMateMap;
       TMateMap mateMap;
@@ -227,18 +232,16 @@ namespace coralns
       while (sam_itr_next(samfile, iter, rec) >= 0) {
 	if (rec->core.flag & (BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FSUPPLEMENTARY | BAM_FUNMAP)) continue;
 	if ((rec->core.flag & BAM_FPAIRED) && ((rec->core.flag & BAM_FMUNMAP) || (rec->core.tid != rec->core.mtid))) continue;
-	if ((rec->core.flag & BAM_FPAIRED) && (getLayout(rec->core) != 2)) continue;
 	if (rec->core.qual < c.minQual) continue;
 
+	int32_t midPoint = rec->core.pos + halfAlignmentLength(rec);
+	int32_t isize = 0;
 	if (rec->core.flag & BAM_FPAIRED) {
 	  // Clean-up the read store for identical alignment positions
 	  if (rec->core.pos > lastAlignedPos) {
 	    lastAlignedPosReads.clear();
 	    lastAlignedPos = rec->core.pos;
 	  }
-
-	  // Check alignment quality
-	  if ((c.alignmentQ) && (getPercentIdentity(rec, ref) < c.alignmentQ)) continue;
 
 	  // Process pair
 	  if ((rec->core.pos < rec->core.mpos) || ((rec->core.pos == rec->core.mpos) && (lastAlignedPosReads.find(hash_string(bam_get_qname(rec))) == lastAlignedPosReads.end()))) {
@@ -255,36 +258,62 @@ namespace coralns
 	  }
 	
 	  // Insert size filter
-	  int32_t isize = (rec->core.pos + alignmentLength(rec)) - rec->core.mpos;
-	  if ((isize <= li.minNormalISize) || (isize >= li.maxNormalISize)) continue;
+	  isize = (rec->core.pos + alignmentLength(rec)) - rec->core.mpos;
+	  if ((li.minNormalISize < isize) && (isize < li.maxNormalISize)) {
+	    midPoint = rec->core.mpos + (int32_t) (isize/2);
+	  } else {
+	    if (rec->core.flag & BAM_FREVERSE) midPoint = rec->core.pos - (c.meanisize / 2);
+	    else midPoint = rec->core.pos + (c.meanisize / 2);
+	  }
+	}
 
-	  // Count fragment mid-points
-	  int32_t midPoint = rec->core.mpos + (int32_t) (isize/2);
-	  int32_t fragstart = midPoint - halfwin;
-	  int32_t fragend = midPoint + halfwin + 1;
-	  if ((fragstart >= 0) && (fragend < (int32_t) hdr->target_len[refIndex])) {
-	    int32_t usum = 0;
-	    int32_t gcsum = 0;
-	    for(int32_t i = fragstart; i < fragend; ++i) {
-	      if (uniq[i]) ++usum;
-	      if (gcref[i]) ++gcsum;
-	    }
-	    //std::string refslice = boost::to_upper_copy(std::string(ref + fragstart, ref + fragend));
-	    //std::cerr << refslice << ',' << c.meanisize << ',' << gcsum << ',' << usum << std::endl;
-	    if (usum == c.meanisize) {
-	      // Valid bin?
-	      uint32_t bin = midPoint / c.scanWindow;
-	      if (bin < scanCounts[refIndex].size()) {
-		if ((scanCounts[refIndex][bin] > cb.first) && (scanCounts[refIndex][bin] < cb.second)) ++gcbias[gcsum].sample;
+	// Count fragment
+	if ((midPoint >= 0) && (midPoint < (int32_t) hdr->target_len[refIndex]) && (cov[midPoint] < maxCoverage - 1)) ++cov[midPoint];
+	/*
+	// Is this a good position to sample GC?
+	if ((li.minNormalISize < isize) && (isize < li.maxNormalISize)) {
+	  if ((rec->core.flag & BAM_FPAIRED) && (getLayout(rec->core) == 2)) {
+	    // Check alignment quality
+	    if ((!c.alignmentQ) || (getPercentIdentity(rec, ref) >= c.alignmentQ)) {
+	      if (uniqContent[midPoint] == c.meanisize) {
+		// Valid bin?
+		uint32_t bin = midPoint / c.scanWindow;
+		if (bin < scanCounts[refIndex].size()) {
+		  if ((scanCounts[refIndex][bin] > cb.first) && (scanCounts[refIndex][bin] < cb.second)) {
+		    if (gcpos[midPoint] < maxCoverage - 1) ++gcpos[midPoint];
+		  }
+		}
 	      }
 	    }
 	  }
 	}
+	*/
       }
       bam_destroy1(rec);
       hts_itr_destroy(iter);
       if (seq != NULL) free(seq);
       if (ref != NULL) free(ref);
+
+      // Summarize GC coverage for this chromosome
+      for(uint32_t i = 0; i < hdr->target_len[refIndex]; ++i) {
+	if (uniqContent[i] == c.meanisize) {
+	  // Valid bin?
+	  uint32_t bin = i / c.scanWindow;
+	  if (bin < scanCounts[refIndex].size()) {
+	    if ((scanCounts[refIndex][bin] > cb.first) && (scanCounts[refIndex][bin] < cb.second)) {
+	      ++gcbias[gcContent[i]].reference;
+	      gcbias[gcContent[i]].sample += cov[i];
+	      gcbias[gcContent[i]].coverage += cov[i];
+	    }
+	  }
+	}
+      }
+    }
+    
+    // Normalize GC coverage
+    for(uint32_t i = 0; i < gcbias.size(); ++i) {
+      if (gcbias[i].reference) gcbias[i].coverage /= (double) gcbias[i].reference;
+      else gcbias[i].coverage = 0;
     }
 
     // Determine percentiles
@@ -308,7 +337,7 @@ namespace coralns
     }
       
     // Output GC-bias
-    //for(uint32_t i = 0; i < gcbias.size(); ++i) std::cerr << i << "\t(" << gcbias[i].sample << "," << gcbias[i].reference << ")\t(" << gcbias[i].percentileSample << "," << gcbias[i].percentileReference << ")\t(" << gcbias[i].fractionSample << "," << gcbias[i].fractionReference << ")\t" << gcbias[i].obsexp << std::endl;
+    for(uint32_t i = 0; i < gcbias.size(); ++i) std::cerr << i << "\t(" << gcbias[i].sample << "," << gcbias[i].reference << ")\t(" << gcbias[i].percentileSample << "," << gcbias[i].percentileReference << ")\t(" << gcbias[i].fractionSample << "," << gcbias[i].fractionReference << ")\t" << gcbias[i].obsexp << "," << gcbias[i].coverage << std::endl;
 
     fai_destroy(faiRef);
     fai_destroy(faiMap);
