@@ -43,6 +43,7 @@ namespace coralns
 {
 
   struct CountDNAConfig {
+    bool hasStatsFile;
     uint32_t nchr;
     uint32_t meanisize;
     uint32_t window_size;
@@ -55,6 +56,7 @@ namespace coralns
     float alignmentQ;
     std::string sampleName;
     boost::filesystem::path genome;
+    boost::filesystem::path statsFile;
     boost::filesystem::path mapFile;
     boost::filesystem::path bamFile;
     boost::filesystem::path outfile;
@@ -79,7 +81,7 @@ namespace coralns
     boost::iostreams::filtering_ostream dataOut;
     dataOut.push(boost::iostreams::gzip_compressor());
     dataOut.push(boost::iostreams::file_sink(c.outfile.string().c_str(), std::ios_base::out | std::ios_base::binary));
-    dataOut << "chr\tstart\tend\t" << c.sampleName << std::endl;
+    dataOut << "chr\tstart\tend\t" << c.sampleName << "_counts\t" << c.sampleName << "_CN" << std::endl;
     
     // Iterate chromosomes
     faidx_t* faiMap = fai_load(c.mapFile.string().c_str());
@@ -219,7 +221,7 @@ namespace coralns
 	    obsexp /= (double) winlen;
 	    double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
 	    double cn = 2 * covsum / expcov;
-	    dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (start + c.window_size) << "\t" << cn << std::endl;
+	    dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (start + c.window_size) << "\t" << count << "\t" << cn << std::endl;
 	  }
 	}
       }
@@ -239,7 +241,6 @@ namespace coralns
   
   int countReads(int argc, char **argv) {
     CountDNAConfig c;
-    c.meanisize = 300;   // Best guess for illumina PE
     
     // Parameter
     boost::program_options::options_description generic("Generic options");
@@ -268,6 +269,7 @@ namespace coralns
 
     boost::program_options::options_description hidden("Hidden options");
     hidden.add_options()
+      ("statsfile,t", boost::program_options::value<boost::filesystem::path>(&c.statsFile), "stats output file")
       ("input-file", boost::program_options::value<boost::filesystem::path>(&c.bamFile), "input bam file")
       ;
 
@@ -293,7 +295,26 @@ namespace coralns
       return 1;
     }
 
+    // Show cmd
+    boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] ";
+    std::cout << "coral ";
+    for(int i=0; i<argc; ++i) { std::cout << argv[i] << ' '; }
+    std::cout << std::endl;
+
+    // Stats file
+    if (vm.count("statsfile")) c.hasStatsFile = true;
+    else c.hasStatsFile = false;
+
+    // Open stats file
+    boost::iostreams::filtering_ostream statsOut;
+    if (c.hasStatsFile) {
+      statsOut.push(boost::iostreams::gzip_compressor());
+      statsOut.push(boost::iostreams::file_sink(c.statsFile.string().c_str(), std::ios_base::out | std::ios_base::binary));
+    }
+    
     // Check bam file
+    LibraryInfo li;
     if (!(boost::filesystem::exists(c.bamFile) && boost::filesystem::is_regular_file(c.bamFile) && boost::filesystem::file_size(c.bamFile))) {
       std::cerr << "Alignment file is missing: " << c.bamFile.string() << std::endl;
       return 1;
@@ -318,41 +339,60 @@ namespace coralns
       c.nchr = hdr->n_targets;
       c.minChrLen = setMinChrLen(hdr, 0.95);
 
+      // Estimate insert size
+      getLibraryParams(c, li);
+      c.meanisize = ((int32_t) (li.median / 2)) * 2 + 1;
+      if (c.hasStatsFile) {
+	statsOut << "LP\t" << li.rs << ',' << li.median << ',' << li.mad << ',' << li.minNormalISize << ',' << li.maxNormalISize << std::endl;
+      }
+	
       // Clean-up
       bam_hdr_destroy(hdr);
       hts_idx_destroy(idx);
       sam_close(samfile);
     }
 
-    // Show cmd
-    boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] ";
-    std::cout << "coral ";
-    for(int i=0; i<argc; ++i) { std::cout << argv[i] << ' '; }
-    std::cout << std::endl;
-
     // Scan genomic windows
-    typedef std::vector<uint32_t> TWindowCounts;
+    typedef std::vector<ScanWindow> TWindowCounts;
     typedef std::vector<TWindowCounts> TGenomicWindowCounts;
     TGenomicWindowCounts scanCounts(c.nchr, TWindowCounts());
     scan(c, scanCounts);
-    //for(uint32_t i = 0; i < c.nchr; ++i) { for(uint32_t k = 0; k < scanCounts[i].size(); ++k) { std::cerr << scanCounts[i][k] << std::endl;  }   }
-
-    // Estimate library parameters
-    LibraryInfo li;
-    getLibraryParams(c, scanCounts, li);
-    c.meanisize = ((int32_t) (li.median / 2)) * 2 + 1;
-    //std::cerr << li.rs << ',' << li.median << ',' << li.mad << ',' << li.minNormalISize << ',' << li.maxNormalISize << std::endl;
-
+    
+    // Select stable windows
+    selectWindows(c, scanCounts);
+    if (c.hasStatsFile) {
+      samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
+      bam_hdr_t* hdr = sam_hdr_read(samfile);
+      statsOut << "SW\tchrom\tstart\tend\tselected\tcoverage\trplus\tnonrplus\tuniqcov\tlayoutratio" <<  std::endl;
+      for(uint32_t refIndex = 0; refIndex < (uint32_t) hdr->n_targets; ++refIndex) {
+	for(uint32_t i = 0; i < scanCounts[refIndex].size(); ++i) {
+	  statsOut << "SW\t" <<  hdr->target_name[refIndex] << '\t' << i * c.scanWindow << '\t' << (i+1) * c.scanWindow << '\t' << scanCounts[refIndex][i].select << '\t' << scanCounts[refIndex][i].cov << '\t' << scanCounts[refIndex][i].rplus << '\t' << scanCounts[refIndex][i].nonrplus << '\t' << scanCounts[refIndex][i].uniqcov << '\t' << scanCounts[refIndex][i].layoutratio << std::endl;
+	}
+      }
+      bam_hdr_destroy(hdr);
+      sam_close(samfile);
+    }
+    
     // GC bias estimation
     std::vector<GcBias> gcbias(c.meanisize + 1, GcBias());
     gcBias(c, scanCounts, li, gcbias);
+    if (c.hasStatsFile) {
+      statsOut << "GC\tgcsum\tsample\treference\tpercentileSample\tpercentileReference\tfractionSample\tfractionReference\tobsexp\tmeancoverage" << std::endl;
+      for(uint32_t i = 0; i < gcbias.size(); ++i) statsOut << "GC\t" << i << "\t" << gcbias[i].sample << "\t" << gcbias[i].reference << "\t" << gcbias[i].percentileSample << "\t" << gcbias[i].percentileReference << "\t" << gcbias[i].fractionSample << "\t" << gcbias[i].fractionReference << "\t" << gcbias[i].obsexp << "\t" << gcbias[i].coverage << std::endl;
+    }
 
     // Correctable GC range
     typedef std::pair<uint32_t, uint32_t> TGCBound;
     TGCBound gcbound = gcBound(c, gcbias);
-    //std::cerr << gcbound.first << "," << gcbound.second << std::endl;
+    if (c.hasStatsFile) {
+      statsOut << "BoundsGC\t" << gcbound.first << "," << gcbound.second << std::endl;
+    }
 
+    // Close stats file
+    if (c.hasStatsFile) {
+      statsOut.pop();
+    }
+    
     // Count reads
     return bamCount(c, li, gcbias, gcbound);
   }

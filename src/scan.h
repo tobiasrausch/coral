@@ -40,9 +40,75 @@ Contact: Tobias Rausch (rausch@embl.de)
 namespace coralns
 {
 
+
   template<typename TConfig>
-  inline int32_t
-  scan(TConfig const& c, std::vector< std::vector<uint32_t> >& scanCounts) {
+  inline std::pair<uint32_t, uint32_t>
+  estCountBounds(TConfig const& c, std::vector< std::vector<ScanWindow> > const& scanCounts) {
+    std::vector<uint32_t> all;
+    for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) {
+      for(uint32_t i = 0; i<scanCounts[refIndex].size(); ++i) {
+	all.push_back(scanCounts[refIndex][i].cov);
+      }
+    }
+    std::sort(all.begin(), all.end());
+    uint32_t median = all[all.size() / 2];
+    std::vector<uint32_t> absdev;
+    for(uint32_t i = 0; i<all.size(); ++i) absdev.push_back(std::abs((int32_t) all[i] - (int32_t) median));
+    std::sort(absdev.begin(), absdev.end());
+    uint32_t mad = absdev[absdev.size() / 2];
+    uint32_t lowerBound = 0;
+    if (c.mad * mad < median) lowerBound = median - c.mad * mad;
+    uint32_t upperBound = median + c.mad * mad;
+    return std::make_pair(lowerBound, upperBound);
+  }
+
+  template<typename TConfig>
+  inline std::pair<uint32_t, uint32_t>
+  estUniqCountBounds(TConfig const& c, std::vector< std::vector<ScanWindow> > const& scanCounts) {
+    std::vector<uint32_t> all;
+    for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) {
+      for(uint32_t i = 0; i<scanCounts[refIndex].size(); ++i) {
+	all.push_back(scanCounts[refIndex][i].uniqcov);
+      }
+    }
+    std::sort(all.begin(), all.end());
+    uint32_t median = all[all.size() / 2];
+    std::vector<uint32_t> absdev;
+    for(uint32_t i = 0; i<all.size(); ++i) absdev.push_back(std::abs((int32_t) all[i] - (int32_t) median));
+    std::sort(absdev.begin(), absdev.end());
+    uint32_t mad = absdev[absdev.size() / 2];
+    uint32_t lowerBound = 0;
+    if (c.mad * mad < median) lowerBound = median - c.mad * mad;
+    uint32_t upperBound = median + c.mad * mad;
+    return std::make_pair(lowerBound, upperBound);
+  }
+  
+  template<typename TConfig>
+  inline std::pair<double, double>
+  estLayoutBounds(TConfig const& c, std::vector< std::vector<ScanWindow> > const& scanCounts) {
+    std::vector<double> all;
+    for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) {
+      for(uint32_t i = 0; i<scanCounts[refIndex].size(); ++i) {
+	all.push_back(scanCounts[refIndex][i].layoutratio);
+      }
+    }
+    std::sort(all.begin(), all.end());
+    double median = all[all.size() / 2];
+    std::vector<double> absdev;
+    for(uint32_t i = 0; i<all.size(); ++i) absdev.push_back(std::abs((double) all[i] - (double) median));
+    std::sort(absdev.begin(), absdev.end());
+    double mad = absdev[absdev.size() / 2];
+    double lowerBound = 0;
+    if (c.mad * mad < median) lowerBound = median - c.mad * mad;
+    double upperBound = median + c.mad * mad;
+    return std::make_pair(lowerBound, upperBound);
+  }
+  
+
+  
+  template<typename TConfig>
+  inline void
+  scan(TConfig const& c, std::vector< std::vector<ScanWindow> >& scanCounts) {
 
     // Load bam file
     samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
@@ -56,6 +122,7 @@ namespace coralns
     boost::progress_display show_progress( hdr->n_targets );
 
     // Iterate chromosomes
+    faidx_t* faiMap = fai_load(c.mapFile.string().c_str());
     for(int32_t refIndex=0; refIndex < (int32_t) hdr->n_targets; ++refIndex) {
       ++show_progress;
       if (chrNoData(c, refIndex, idx)) continue;
@@ -64,9 +131,40 @@ namespace coralns
       // Exclude sex chromosomes
       if ((std::string(hdr->target_name[refIndex]) == "chrX") || (std::string(hdr->target_name[refIndex]) == "chrY") || (std::string(hdr->target_name[refIndex]) == "X") || (std::string(hdr->target_name[refIndex]) == "Y")) continue;
 
+      // Check presence in mappability map
+      std::string tname(hdr->target_name[refIndex]);
+      int32_t seqlen = faidx_seq_len(faiMap, tname.c_str());
+      if (seqlen == - 1) continue;
+      else seqlen = -1;
+      char* seq = faidx_fetch_seq(faiMap, tname.c_str(), 0, faidx_seq_len(faiMap, tname.c_str()), &seqlen);
+
+      // Get Mappability
+      std::vector<uint16_t> uniqContent(hdr->target_len[refIndex], 0);
+      {
+	// Mappability map
+	typedef boost::dynamic_bitset<> TBitSet;
+	TBitSet uniq(hdr->target_len[refIndex], false);
+	for(uint32_t i = 0; i < hdr->target_len[refIndex]; ++i) {
+	  if (seq[i] == 'C') uniq[i] = 1;
+	}
+
+	// Sum across fragments
+	int32_t halfwin = (int32_t) (c.meanisize / 2);
+	int32_t usum = 0;
+	for(int32_t pos = halfwin; pos < (int32_t) hdr->target_len[refIndex] - halfwin; ++pos) {
+	  if (pos == halfwin) {
+	    for(int32_t i = pos - halfwin; i<=pos+halfwin; ++i) usum += uniq[i];
+	  } else {
+	    usum -= uniq[pos - halfwin - 1];
+	    usum += uniq[pos + halfwin];
+	  }
+	  uniqContent[pos] = usum;
+	}
+      }
+      
       // Bins on this chromosome
       uint32_t allbins = hdr->target_len[refIndex] / c.scanWindow;
-      scanCounts[refIndex].resize(allbins, 0);
+      scanCounts[refIndex].resize(allbins, ScanWindow());
       
       // Mate map
       typedef boost::unordered_map<std::size_t, bool> TMateMap;
@@ -111,28 +209,14 @@ namespace coralns
 	// Count fragment
 	if ((midPoint >= 0) && (midPoint < (int32_t) hdr->target_len[refIndex])) {
 	  uint32_t bin = midPoint / c.scanWindow;
-	  if (bin < allbins) ++scanCounts[refIndex][bin];
-	}
-
-	/*
-	// Is this a good position to sample GC?
-	if ((li.minNormalISize < isize) && (isize < li.maxNormalISize)) {
-	  if ((rec->core.flag & BAM_FPAIRED) && (getLayout(rec->core) == 2)) {
-	    // Check alignment quality
-	    if ((!c.alignmentQ) || (getPercentIdentity(rec, ref) >= c.alignmentQ)) {
-	      if (uniqContent[midPoint] == c.meanisize) {
-		// Valid bin?
-		uint32_t bin = midPoint / c.scanWindow;
-		if (bin < scanCounts[refIndex].size()) {
-		  if ((scanCounts[refIndex][bin] > cb.first) && (scanCounts[refIndex][bin] < cb.second)) {
-		    if (gcpos[midPoint] < maxCoverage - 1) ++gcpos[midPoint];
-		  }
-		}
-	      }
-	    }
+	  if (bin < allbins) {
+	    ++scanCounts[refIndex][bin].cov;
+	    if (getLayout(rec->core) == 2) ++scanCounts[refIndex][bin].rplus;
+	    else ++scanCounts[refIndex][bin].nonrplus;
+	    if (uniqContent[midPoint]) ++scanCounts[refIndex][bin].uniqcov;
+	    // Not used: if ((!c.alignmentQ) || (getPercentIdentity(rec, ref) >= c.alignmentQ))
 	  }
 	}
-	*/
       }
       // Clean-up
       bam_destroy1(rec);
@@ -141,13 +225,50 @@ namespace coralns
     }
 	  
     // clean-up
+    fai_destroy(faiMap);
     bam_hdr_destroy(hdr);
     hts_idx_destroy(idx);
     sam_close(samfile);
-    
-    return 0;
   }
 
+
+  template<typename TConfig>
+  inline void
+  selectWindows(TConfig const& c, std::vector< std::vector<ScanWindow> >& scanCounts) {
+
+    // Get "normal" coverage windows and "normal" unique coverage windows
+    typedef std::pair<uint32_t, uint32_t> TCountBounds;
+    TCountBounds cb = estCountBounds(c, scanCounts);
+    TCountBounds ub = estUniqCountBounds(c, scanCounts);
+    
+    // Assess rplus fraction
+    for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) {
+      for(uint32_t i = 0; i<scanCounts[refIndex].size(); ++i) {
+	if ((scanCounts[refIndex][i].cov > cb.first) && (scanCounts[refIndex][i].cov < cb.second) && (scanCounts[refIndex][i].uniqcov > ub.first) && (scanCounts[refIndex][i].uniqcov < ub.second)) {
+	  double totalPairs = scanCounts[refIndex][i].rplus + scanCounts[refIndex][i].nonrplus;
+	  scanCounts[refIndex][i].layoutratio = 0;
+	  if (totalPairs > 0) scanCounts[refIndex][i].layoutratio = (double) scanCounts[refIndex][i].rplus / totalPairs;
+	  scanCounts[refIndex][i].select = true;
+	} else {
+	  scanCounts[refIndex][i].select = false;
+	}
+      }
+    }
+
+    // Estimate layout bounds
+    typedef std::pair<double, double> TLayoutBounds;
+    TLayoutBounds lb = estLayoutBounds(c, scanCounts);
+
+    // Select windows
+    for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) {
+      for(uint32_t i = 0; i<scanCounts[refIndex].size(); ++i) {
+	if (scanCounts[refIndex][i].select) {
+	  if ((scanCounts[refIndex][i].layoutratio > lb.first) && (scanCounts[refIndex][i].layoutratio < lb.second)) scanCounts[refIndex][i].select = true;
+	  else scanCounts[refIndex][i].select = false;
+	}
+      }
+    }
+  }
   
 }
 

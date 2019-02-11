@@ -140,11 +140,7 @@ namespace coralns
   
   template<typename TConfig>
   inline void
-  gcBias(TConfig const& c, std::vector< std::vector<uint32_t> > const& scanCounts, LibraryInfo const& li, std::vector<GcBias>& gcbias) {
-
-    typedef std::pair<uint32_t, uint32_t> TCountBounds;
-    TCountBounds cb = estCountBounds(c, scanCounts);
-    
+  gcBias(TConfig const& c, std::vector< std::vector<ScanWindow> > const& scanCounts, LibraryInfo const& li, std::vector<GcBias>& gcbias) {
     // Load bam file
     samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
@@ -281,7 +277,7 @@ namespace coralns
 	  // Valid bin?
 	  uint32_t bin = i / c.scanWindow;
 	  if (bin < scanCounts[refIndex].size()) {
-	    if ((scanCounts[refIndex][bin] > cb.first) && (scanCounts[refIndex][bin] < cb.second)) {
+	    if (scanCounts[refIndex][bin].select) {
 	      ++gcbias[gcContent[i]].reference;
 	      gcbias[gcContent[i]].sample += cov[i];
 	      gcbias[gcContent[i]].coverage += cov[i];
@@ -317,9 +313,6 @@ namespace coralns
       if (gcbias[i].fractionReference > 0) gcbias[i].obsexp = gcbias[i].fractionSample / gcbias[i].fractionReference;
     }
       
-    // Output GC-bias
-    for(uint32_t i = 0; i < gcbias.size(); ++i) std::cerr << i << "\t(" << gcbias[i].sample << "," << gcbias[i].reference << ")\t(" << gcbias[i].percentileSample << "," << gcbias[i].percentileReference << ")\t(" << gcbias[i].fractionSample << "," << gcbias[i].fractionReference << ")\t" << gcbias[i].obsexp << "," << gcbias[i].coverage << std::endl;
-
     fai_destroy(faiRef);
     fai_destroy(faiMap);
     hts_idx_destroy(idx);

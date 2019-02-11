@@ -45,6 +45,15 @@ Contact: Tobias Rausch (rausch@embl.de)
 namespace coralns
 {
 
+  struct ScanWindow {
+    bool select;
+    uint32_t cov;
+    uint32_t rplus;
+    uint32_t nonrplus;
+    uint32_t uniqcov;
+    double layoutratio;
+  };
+    
   struct LibraryInfo {
     int32_t rs;
     int32_t median;
@@ -158,28 +167,8 @@ namespace coralns
   }
 
   template<typename TConfig>
-  inline std::pair<uint32_t, uint32_t>
-  estCountBounds(TConfig const& c, std::vector< std::vector<uint32_t> > const& scanCounts) {
-    std::vector<uint32_t> all;
-    for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) all.insert(all.end(), scanCounts[refIndex].begin(), scanCounts[refIndex].end());
-    std::sort(all.begin(), all.end());
-    uint32_t median = all[all.size() / 2];
-    std::vector<uint32_t> absdev;
-    for(uint32_t i = 0; i<all.size(); ++i) absdev.push_back(std::abs((int32_t) all[i] - (int32_t) median));
-    std::sort(absdev.begin(), absdev.end());
-    uint32_t mad = absdev[absdev.size() / 2];
-    uint32_t lowerBound = 0;
-    if (c.mad * mad < median) lowerBound = median - c.mad * mad;
-    uint32_t upperBound = median + c.mad * mad;
-    return std::make_pair(lowerBound, upperBound);
-  }
-  
-  template<typename TConfig>
   inline void
-  getLibraryParams(TConfig const& c, std::vector< std::vector<uint32_t> > const& scanCounts, LibraryInfo& li) {
-    typedef std::pair<uint32_t, uint32_t> TCountBounds;
-    TCountBounds cb = estCountBounds(c, scanCounts);
-    
+  getLibraryParams(TConfig const& c, LibraryInfo& li) {
     // Open file handles
     samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
@@ -209,42 +198,37 @@ namespace coralns
     for(uint32_t refIndex=0; refIndex < (uint32_t) hdr->n_targets; ++refIndex) {
       ++show_progress;
       if (libCharacterized) continue;
-      if (scanCounts[refIndex].empty()) continue;
-      for(uint32_t kwin = 0; ((kwin < scanCounts[refIndex].size()) && (!libCharacterized)); ++kwin) {
-	if ((scanCounts[refIndex][kwin] > cb.first) && (scanCounts[refIndex][kwin] < cb.second)) {
-	  hts_itr_t* iter = sam_itr_queryi(idx, refIndex, kwin * c.scanWindow, ((kwin + 1) * c.scanWindow));
-	  bam1_t* rec = bam_init1();
-	  while (sam_itr_next(samfile, iter, rec) >= 0) {
-	    if (!(rec->core.flag & BAM_FREAD2) && (rec->core.l_qseq < 65000)) {
-	      if (rec->core.flag & (BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FSUPPLEMENTARY | BAM_FUNMAP)) continue;
-	      if ((alignmentCount > maxAlignmentsScreened) || ((processedNumReads >= maxNumAlignments) && (processedNumPairs == 0)) || (processedNumPairs >= maxNumAlignments)) {
-		  // Paired-end library with enough pairs
-		  libCharacterized = true;
-		  break;
-	      }
-	      ++alignmentCount;
+      hts_itr_t* iter = sam_itr_queryi(idx, refIndex, 0, hdr->target_len[refIndex]);
+      bam1_t* rec = bam_init1();
+      while (sam_itr_next(samfile, iter, rec) >= 0) {
+	if (!(rec->core.flag & BAM_FREAD2) && (rec->core.l_qseq < 65000)) {
+	  if (rec->core.flag & (BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FSUPPLEMENTARY | BAM_FUNMAP)) continue;
+	  if ((alignmentCount > maxAlignmentsScreened) || ((processedNumReads >= maxNumAlignments) && (processedNumPairs == 0)) || (processedNumPairs >= maxNumAlignments)) {
+	    // Paired-end library with enough pairs
+	    libCharacterized = true;
+	    break;
+	  }
+	  ++alignmentCount;
 	      
-	      // Single-end
-	      if (processedNumReads < maxNumAlignments) {
-		readSize.push_back(rec->core.l_qseq);
-		++processedNumReads;
-	      }
-	      
-	      // Paired-end
-	      if ((rec->core.flag & BAM_FPAIRED) && !(rec->core.flag & BAM_FMUNMAP) && (rec->core.tid==rec->core.mtid)) {
-		if (processedNumPairs < maxNumAlignments) {
-		  vecISize.push_back(abs(rec->core.isize));
-		  if (getLayout(rec->core) == 2) ++rplus;
-		  else ++nonrplus;
-		  ++processedNumPairs;
-		}
-	      }
+	  // Single-end
+	  if (processedNumReads < maxNumAlignments) {
+	    readSize.push_back(rec->core.l_qseq);
+	    ++processedNumReads;
+	  }
+	  
+	  // Paired-end
+	  if ((rec->core.flag & BAM_FPAIRED) && !(rec->core.flag & BAM_FMUNMAP) && (rec->core.tid==rec->core.mtid)) {
+	    if (processedNumPairs < maxNumAlignments) {
+	      vecISize.push_back(abs(rec->core.isize));
+	      if (getLayout(rec->core) == 2) ++rplus;
+	      else ++nonrplus;
+	      ++processedNumPairs;
 	    }
 	  }
-	  bam_destroy1(rec);
-	  hts_itr_destroy(iter);
 	}
       }
+      bam_destroy1(rec);
+      hts_itr_destroy(iter);
     }
     
     // Get library parameters
