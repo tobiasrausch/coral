@@ -43,7 +43,7 @@ namespace coralns
   template<typename TConfig>
   inline int32_t
   scan(TConfig const& c, std::vector< std::vector<uint32_t> >& scanCounts) {
-    
+
     // Load bam file
     samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
@@ -64,12 +64,10 @@ namespace coralns
       // Exclude sex chromosomes
       if ((std::string(hdr->target_name[refIndex]) == "chrX") || (std::string(hdr->target_name[refIndex]) == "chrY") || (std::string(hdr->target_name[refIndex]) == "X") || (std::string(hdr->target_name[refIndex]) == "Y")) continue;
 
-      // Coverage track
-      typedef uint16_t TCount;
-      uint32_t maxCoverage = std::numeric_limits<TCount>::max();
-      typedef std::vector<TCount> TCoverage;
-      TCoverage cov(hdr->target_len[refIndex], 0);
-
+      // Bins on this chromosome
+      uint32_t allbins = hdr->target_len[refIndex] / c.scanWindow;
+      scanCounts[refIndex].resize(allbins, 0);
+      
       // Mate map
       typedef boost::unordered_map<std::size_t, bool> TMateMap;
       TMateMap mateMap;
@@ -104,21 +102,42 @@ namespace coralns
 	    if ((mateMap.find(hv) == mateMap.end()) || (!mateMap[hv])) continue; // Mate discarded
 	    mateMap[hv] = false;
 	  }
+
+	  // Isize not accurate so use a best guess
+	  if (rec->core.flag & BAM_FREVERSE) midPoint = rec->core.pos + alignmentLength(rec) - (c.meanisize / 2);
+	  else midPoint = rec->core.pos + (c.meanisize / 2);
 	}
-	if ((midPoint < (int32_t) hdr->target_len[refIndex]) && (cov[midPoint] < maxCoverage - 1)) ++cov[midPoint];
+
+	// Count fragment
+	if ((midPoint >= 0) && (midPoint < (int32_t) hdr->target_len[refIndex])) {
+	  uint32_t bin = midPoint / c.scanWindow;
+	  if (bin < allbins) ++scanCounts[refIndex][bin];
+	}
+
+	/*
+	// Is this a good position to sample GC?
+	if ((li.minNormalISize < isize) && (isize < li.maxNormalISize)) {
+	  if ((rec->core.flag & BAM_FPAIRED) && (getLayout(rec->core) == 2)) {
+	    // Check alignment quality
+	    if ((!c.alignmentQ) || (getPercentIdentity(rec, ref) >= c.alignmentQ)) {
+	      if (uniqContent[midPoint] == c.meanisize) {
+		// Valid bin?
+		uint32_t bin = midPoint / c.scanWindow;
+		if (bin < scanCounts[refIndex].size()) {
+		  if ((scanCounts[refIndex][bin] > cb.first) && (scanCounts[refIndex][bin] < cb.second)) {
+		    if (gcpos[midPoint] < maxCoverage - 1) ++gcpos[midPoint];
+		  }
+		}
+	      }
+	    }
+	  }
+	}
+	*/
       }
       // Clean-up
       bam_destroy1(rec);
       hts_itr_destroy(iter);
       mateMap.clear();
-
-      for(uint32_t start = 0; start < hdr->target_len[refIndex]; start = start + c.scanWindow) {
-	if (start + c.scanWindow < hdr->target_len[refIndex]) {
-	  uint32_t covsum = 0;
-	  for(uint32_t pos = start; pos < start + c.scanWindow; ++pos) covsum += cov[pos];
-	  scanCounts[refIndex].push_back(covsum);
-	}
-      }
     }
 	  
     // clean-up

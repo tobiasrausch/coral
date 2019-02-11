@@ -186,7 +186,7 @@ namespace coralns
 	  if ((li.minNormalISize < isize) && (isize < li.maxNormalISize)) {
 	    midPoint = rec->core.mpos + (int32_t) (isize/2);
 	  } else {
-	    if (rec->core.flag & BAM_FREVERSE) midPoint = rec->core.pos - (c.meanisize / 2);
+	    if (rec->core.flag & BAM_FREVERSE) midPoint = rec->core.pos + alignmentLength(rec) - (c.meanisize / 2);
 	    else midPoint = rec->core.pos + (c.meanisize / 2);
 	  }
 	}
@@ -239,6 +239,7 @@ namespace coralns
   
   int countReads(int argc, char **argv) {
     CountDNAConfig c;
+    c.meanisize = 300;   // Best guess for illumina PE
     
     // Parameter
     boost::program_options::options_description generic("Generic options");

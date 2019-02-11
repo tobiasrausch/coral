@@ -262,32 +262,13 @@ namespace coralns
 	  if ((li.minNormalISize < isize) && (isize < li.maxNormalISize)) {
 	    midPoint = rec->core.mpos + (int32_t) (isize/2);
 	  } else {
-	    if (rec->core.flag & BAM_FREVERSE) midPoint = rec->core.pos - (c.meanisize / 2);
+	    if (rec->core.flag & BAM_FREVERSE) midPoint = rec->core.pos + alignmentLength(rec) - (c.meanisize / 2);
 	    else midPoint = rec->core.pos + (c.meanisize / 2);
 	  }
 	}
 
 	// Count fragment
 	if ((midPoint >= 0) && (midPoint < (int32_t) hdr->target_len[refIndex]) && (cov[midPoint] < maxCoverage - 1)) ++cov[midPoint];
-	/*
-	// Is this a good position to sample GC?
-	if ((li.minNormalISize < isize) && (isize < li.maxNormalISize)) {
-	  if ((rec->core.flag & BAM_FPAIRED) && (getLayout(rec->core) == 2)) {
-	    // Check alignment quality
-	    if ((!c.alignmentQ) || (getPercentIdentity(rec, ref) >= c.alignmentQ)) {
-	      if (uniqContent[midPoint] == c.meanisize) {
-		// Valid bin?
-		uint32_t bin = midPoint / c.scanWindow;
-		if (bin < scanCounts[refIndex].size()) {
-		  if ((scanCounts[refIndex][bin] > cb.first) && (scanCounts[refIndex][bin] < cb.second)) {
-		    if (gcpos[midPoint] < maxCoverage - 1) ++gcpos[midPoint];
-		  }
-		}
-	      }
-	    }
-	  }
-	}
-	*/
       }
       bam_destroy1(rec);
       hts_itr_destroy(iter);
