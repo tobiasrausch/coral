@@ -41,13 +41,12 @@ namespace coralns
 {
 
 
-  template<typename TConfig>
   inline std::pair<uint32_t, uint32_t>
-  estCountBounds(TConfig const& c, std::vector< std::vector<ScanWindow> > const& scanCounts) {
+  estCountBounds(std::vector< std::vector<ScanWindow> > const& scanCounts) {
     std::vector<uint32_t> all;
     for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) {
       for(uint32_t i = 0; i<scanCounts[refIndex].size(); ++i) {
-	all.push_back(scanCounts[refIndex][i].cov);
+	if (scanCounts[refIndex][i].select) all.push_back(scanCounts[refIndex][i].cov);
       }
     }
     std::sort(all.begin(), all.end());
@@ -57,55 +56,11 @@ namespace coralns
     std::sort(absdev.begin(), absdev.end());
     uint32_t mad = absdev[absdev.size() / 2];
     uint32_t lowerBound = 0;
-    if (c.mad * mad < median) lowerBound = median - c.mad * mad;
-    uint32_t upperBound = median + c.mad * mad;
+    if (2 * mad < median) lowerBound = median - 2 * mad;
+    uint32_t upperBound = median + 2 * mad;
     return std::make_pair(lowerBound, upperBound);
   }
 
-  template<typename TConfig>
-  inline std::pair<uint32_t, uint32_t>
-  estUniqCountBounds(TConfig const& c, std::vector< std::vector<ScanWindow> > const& scanCounts) {
-    std::vector<uint32_t> all;
-    for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) {
-      for(uint32_t i = 0; i<scanCounts[refIndex].size(); ++i) {
-	all.push_back(scanCounts[refIndex][i].uniqcov);
-      }
-    }
-    std::sort(all.begin(), all.end());
-    uint32_t median = all[all.size() / 2];
-    std::vector<uint32_t> absdev;
-    for(uint32_t i = 0; i<all.size(); ++i) absdev.push_back(std::abs((int32_t) all[i] - (int32_t) median));
-    std::sort(absdev.begin(), absdev.end());
-    uint32_t mad = absdev[absdev.size() / 2];
-    uint32_t lowerBound = 0;
-    if (c.mad * mad < median) lowerBound = median - c.mad * mad;
-    uint32_t upperBound = median + c.mad * mad;
-    return std::make_pair(lowerBound, upperBound);
-  }
-  
-  template<typename TConfig>
-  inline std::pair<double, double>
-  estLayoutBounds(TConfig const& c, std::vector< std::vector<ScanWindow> > const& scanCounts) {
-    std::vector<double> all;
-    for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) {
-      for(uint32_t i = 0; i<scanCounts[refIndex].size(); ++i) {
-	all.push_back(scanCounts[refIndex][i].layoutratio);
-      }
-    }
-    std::sort(all.begin(), all.end());
-    double median = all[all.size() / 2];
-    std::vector<double> absdev;
-    for(uint32_t i = 0; i<all.size(); ++i) absdev.push_back(std::abs((double) all[i] - (double) median));
-    std::sort(absdev.begin(), absdev.end());
-    double mad = absdev[absdev.size() / 2];
-    double lowerBound = 0;
-    if (c.mad * mad < median) lowerBound = median - c.mad * mad;
-    double upperBound = median + c.mad * mad;
-    return std::make_pair(lowerBound, upperBound);
-  }
-  
-
-  
   template<typename TConfig>
   inline void
   scan(TConfig const& c, std::vector< std::vector<ScanWindow> >& scanCounts) {
@@ -123,6 +78,7 @@ namespace coralns
 
     // Iterate chromosomes
     faidx_t* faiMap = fai_load(c.mapFile.string().c_str());
+    faidx_t* faiRef = fai_load(c.genome.string().c_str());
     for(int32_t refIndex=0; refIndex < (int32_t) hdr->n_targets; ++refIndex) {
       ++show_progress;
       if (chrNoData(c, refIndex, idx)) continue;
@@ -138,6 +94,12 @@ namespace coralns
       else seqlen = -1;
       char* seq = faidx_fetch_seq(faiMap, tname.c_str(), 0, faidx_seq_len(faiMap, tname.c_str()), &seqlen);
 
+      // Check presence in reference
+      seqlen = faidx_seq_len(faiRef, tname.c_str());
+      if (seqlen == - 1) continue;
+      else seqlen = -1;
+      char* ref = faidx_fetch_seq(faiRef, tname.c_str(), 0, faidx_seq_len(faiRef, tname.c_str()), &seqlen);
+      
       // Get Mappability
       std::vector<uint16_t> uniqContent(hdr->target_len[refIndex], 0);
       {
@@ -213,8 +175,8 @@ namespace coralns
 	    ++scanCounts[refIndex][bin].cov;
 	    if (getLayout(rec->core) == 2) ++scanCounts[refIndex][bin].rplus;
 	    else ++scanCounts[refIndex][bin].nonrplus;
-	    if (uniqContent[midPoint]) ++scanCounts[refIndex][bin].uniqcov;
-	    // Not used: if ((!c.alignmentQ) || (getPercentIdentity(rec, ref) >= c.alignmentQ))
+	    if (uniqContent[midPoint] == c.meanisize) ++scanCounts[refIndex][bin].uniqcov;
+	    scanCounts[refIndex][bin].alignQ += getPercentIdentity(rec, ref);
 	  }
 	}
       }
@@ -225,6 +187,7 @@ namespace coralns
     }
 	  
     // clean-up
+    fai_destroy(faiRef);
     fai_destroy(faiMap);
     bam_hdr_destroy(hdr);
     hts_idx_destroy(idx);
@@ -232,38 +195,39 @@ namespace coralns
   }
 
 
-  template<typename TConfig>
   inline void
-  selectWindows(TConfig const& c, std::vector< std::vector<ScanWindow> >& scanCounts) {
+  selectWindows(std::vector< std::vector<ScanWindow> >& scanCounts) {
 
-    // Get "normal" coverage windows and "normal" unique coverage windows
-    typedef std::pair<uint32_t, uint32_t> TCountBounds;
-    TCountBounds cb = estCountBounds(c, scanCounts);
-    TCountBounds ub = estUniqCountBounds(c, scanCounts);
-    
-    // Assess rplus fraction
+    // Pre-screen using PE layout, uniqueness and percent identity
     for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) {
       for(uint32_t i = 0; i<scanCounts[refIndex].size(); ++i) {
-	if ((scanCounts[refIndex][i].cov > cb.first) && (scanCounts[refIndex][i].cov < cb.second) && (scanCounts[refIndex][i].uniqcov > ub.first) && (scanCounts[refIndex][i].uniqcov < ub.second)) {
-	  double totalPairs = scanCounts[refIndex][i].rplus + scanCounts[refIndex][i].nonrplus;
-	  scanCounts[refIndex][i].layoutratio = 0;
-	  if (totalPairs > 0) scanCounts[refIndex][i].layoutratio = (double) scanCounts[refIndex][i].rplus / totalPairs;
+	// Layout
+	double totalPairs = scanCounts[refIndex][i].rplus + scanCounts[refIndex][i].nonrplus;
+	scanCounts[refIndex][i].layoutratio = 0;
+	if (totalPairs > 0) scanCounts[refIndex][i].layoutratio = (double) scanCounts[refIndex][i].rplus / totalPairs;
+	// Uniqueness
+	scanCounts[refIndex][i].uniqratio = 0;
+	if (scanCounts[refIndex][i].cov > 0) scanCounts[refIndex][i].uniqratio = (double) scanCounts[refIndex][i].uniqcov / scanCounts[refIndex][i].cov;
+	// Percent identity
+	if (scanCounts[refIndex][i].cov > 0) scanCounts[refIndex][i].alignQ /= scanCounts[refIndex][i].cov;
+	else scanCounts[refIndex][i].alignQ = 0;
+	if ((scanCounts[refIndex][i].layoutratio > 0.999) && (scanCounts[refIndex][i].uniqratio > 0.99) && (scanCounts[refIndex][i].alignQ > 0.99)) {
 	  scanCounts[refIndex][i].select = true;
 	} else {
 	  scanCounts[refIndex][i].select = false;
 	}
       }
     }
-
-    // Estimate layout bounds
-    typedef std::pair<double, double> TLayoutBounds;
-    TLayoutBounds lb = estLayoutBounds(c, scanCounts);
-
-    // Select windows
+    
+    // Get "normal" coverage windows of CN2
+    typedef std::pair<uint32_t, uint32_t> TCountBounds;
+    TCountBounds cb = estCountBounds(scanCounts);
+    
+    // Select CN2 windows
     for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) {
       for(uint32_t i = 0; i<scanCounts[refIndex].size(); ++i) {
 	if (scanCounts[refIndex][i].select) {
-	  if ((scanCounts[refIndex][i].layoutratio > lb.first) && (scanCounts[refIndex][i].layoutratio < lb.second)) scanCounts[refIndex][i].select = true;
+	  if ((scanCounts[refIndex][i].cov > cb.first) && (scanCounts[refIndex][i].cov < cb.second)) scanCounts[refIndex][i].select = true;
 	  else scanCounts[refIndex][i].select = false;
 	}
       }

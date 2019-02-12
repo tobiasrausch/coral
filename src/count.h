@@ -241,14 +241,14 @@ namespace coralns
   
   int countReads(int argc, char **argv) {
     CountDNAConfig c;
-    
+
     // Parameter
     boost::program_options::options_description generic("Generic options");
     generic.add_options()
       ("help,?", "show help message")
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome file")
       ("sample,s", boost::program_options::value<std::string>(&c.sampleName)->default_value("NA12878"), "sample name")
-      ("quality,q", boost::program_options::value<uint16_t>(&c.minQual)->default_value(0), "min. mapping quality")
+      ("quality,q", boost::program_options::value<uint16_t>(&c.minQual)->default_value(10), "min. mapping quality")
       ("mappability,m", boost::program_options::value<boost::filesystem::path>(&c.mapFile), "input mappability map")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("cov.gz"), "coverage output file")
       ;
@@ -262,9 +262,8 @@ namespace coralns
     boost::program_options::options_description gcopt("GC options");
     gcopt.add_options()
       ("scan-window,c", boost::program_options::value<uint32_t>(&c.scanWindow)->default_value(10000), "scanning window size")
-      ("mad-cutoff,d", boost::program_options::value<uint16_t>(&c.mad)->default_value(5), "median + 5 * mad count cutoff")
-      ("alignmentqual,a", boost::program_options::value<float>(&c.alignmentQ)->default_value(0), "alignment fractional identity (0:deactivate)")
-      ("percentile,p", boost::program_options::value<float>(&c.exclgc)->default_value(0.001), "excl. extreme GC fraction")
+      ("mad-cutoff,d", boost::program_options::value<uint16_t>(&c.mad)->default_value(9), "median + 9 * mad count cutoff")
+      ("percentile,p", boost::program_options::value<float>(&c.exclgc)->default_value(0.0005), "excl. extreme GC fraction")
       ;      
 
     boost::program_options::options_description hidden("Hidden options");
@@ -359,14 +358,14 @@ namespace coralns
     scan(c, scanCounts);
     
     // Select stable windows
-    selectWindows(c, scanCounts);
+    selectWindows(scanCounts);
     if (c.hasStatsFile) {
       samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
       bam_hdr_t* hdr = sam_hdr_read(samfile);
-      statsOut << "SW\tchrom\tstart\tend\tselected\tcoverage\trplus\tnonrplus\tuniqcov\tlayoutratio" <<  std::endl;
+      statsOut << "SW\tchrom\tstart\tend\tselected\tcoverage\trplus\tnonrplus\tuniqcov\tlayoutratio\tuniqratio\talignQ" <<  std::endl;
       for(uint32_t refIndex = 0; refIndex < (uint32_t) hdr->n_targets; ++refIndex) {
 	for(uint32_t i = 0; i < scanCounts[refIndex].size(); ++i) {
-	  statsOut << "SW\t" <<  hdr->target_name[refIndex] << '\t' << i * c.scanWindow << '\t' << (i+1) * c.scanWindow << '\t' << scanCounts[refIndex][i].select << '\t' << scanCounts[refIndex][i].cov << '\t' << scanCounts[refIndex][i].rplus << '\t' << scanCounts[refIndex][i].nonrplus << '\t' << scanCounts[refIndex][i].uniqcov << '\t' << scanCounts[refIndex][i].layoutratio << std::endl;
+	  statsOut << "SW\t" <<  hdr->target_name[refIndex] << '\t' << i * c.scanWindow << '\t' << (i+1) * c.scanWindow << '\t' << scanCounts[refIndex][i].select << '\t' << scanCounts[refIndex][i].cov << '\t' << scanCounts[refIndex][i].rplus << '\t' << scanCounts[refIndex][i].nonrplus << '\t' << scanCounts[refIndex][i].uniqcov << '\t' << scanCounts[refIndex][i].layoutratio << '\t' << scanCounts[refIndex][i].uniqratio << '\t' << scanCounts[refIndex][i].alignQ << std::endl;
 	}
       }
       bam_hdr_destroy(hdr);

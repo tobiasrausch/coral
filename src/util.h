@@ -54,7 +54,9 @@ namespace coralns
     uint32_t rplus;
     uint32_t nonrplus;
     uint32_t uniqcov;
+    double alignQ;
     double layoutratio;
+    double uniqratio;
   };
     
   struct LibraryInfo {
