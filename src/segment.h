@@ -65,6 +65,8 @@ namespace coralns
     // Parse signal matrix
     uint32_t refIndex = 0;
     uint32_t row = 0;
+    
+    std::vector<TPrecision> lastVal(cnbc[refIndex].cols, 0.0);
     std::ifstream signalFile(c.signal.string().c_str(), std::ifstream::in);
     cnbc[refIndex].sm.resize(boost::extents[cnbc[refIndex].rows][cnbc[refIndex].cols]);
     if (signalFile.is_open()) {
@@ -73,6 +75,7 @@ namespace coralns
 	getline(signalFile, sigdata);
 	while ((row >= cnbc[refIndex].rows) && (refIndex + 1 < cnbc.size())) {
 	  ++refIndex;
+	  std::fill(lastVal.begin(), lastVal.end(), 0.0);
 	  cnbc[refIndex].sm.resize(boost::extents[cnbc[refIndex].rows][cnbc[refIndex].cols]);
 	  row = 0;
 	}
@@ -90,8 +93,11 @@ namespace coralns
 		uint32_t col = 0;
 		for(;tokIter != tokens.end(); ++tokIter, ++col) {
 		  if (col < cnbc[refIndex].cols) {
-		    if ((*tokIter == "NaN") || (*tokIter == "NA")) cnbc[refIndex].sm[row][col] = 0.0;
-		    else cnbc[refIndex].sm[row][col] = boost::lexical_cast<TPrecision>(*tokIter);
+		    if ((*tokIter == "NaN") || (*tokIter == "NA")) cnbc[refIndex].sm[row][col] = lastVal[col]; // Carry forward old value
+		    else {
+		      cnbc[refIndex].sm[row][col] = boost::lexical_cast<TPrecision>(*tokIter) - 2;
+		      lastVal[col] = cnbc[refIndex].sm[row][col];
+		    }
 		  }
 		}
 	      }
@@ -102,7 +108,24 @@ namespace coralns
       }
       signalFile.close();
     }
-    
+
+    // Output matrix
+    /*
+    std::string outMatrix = c.outprefix + ".raw.gz";
+    boost::iostreams::filtering_ostream dataOut;
+    dataOut.push(boost::iostreams::gzip_compressor());
+    dataOut.push(boost::iostreams::file_sink(outMatrix.c_str(), std::ios_base::out | std::ios_base::binary));
+    for(uint32_t refIndex = 0; refIndex < cnbc.size(); ++refIndex) {
+      for(uint32_t i = 0; i < cnbc[refIndex].rows; ++i) {
+	dataOut << cnbc[refIndex].chr << '\t' << cnbc[refIndex].itv[i].istart << '\t' << cnbc[refIndex].itv[i].iend;
+	for(uint32_t j = 0; j < cnbc[refIndex].cols; ++j) {
+	  dataOut << '\t' << cnbc[refIndex].sm[i][j];
+	}
+	dataOut << std::endl;
+      }
+    }
+    dataOut.pop();
+    */
     
     // Iterate chromosomes
     for(uint32_t refIndex = 0; refIndex < cnbc.size(); ++refIndex) {
@@ -111,11 +134,11 @@ namespace coralns
       gflars(c, cnbc[refIndex].sm, res);
       
       // Debug
-      //for(uint32_t i = 0; i < c.k; ++i ) std::cout << "Iteration " << i << ", " << res.lambda[i] << ", " << res.jump[i] << std::endl;
+      //for(uint32_t i = 0; i < c.k; ++i ) std::cout << "RefIndex " << refIndex << ", Iteration " << i << ", " << res.lambda[i] << ", " << res.jump[i] << std::endl;
       
       // DP
       dpseg(c, cnbc[refIndex].sm, res);
-      
+
       // Smooth signal
       SmoothSignal smoo;
       smoothsignal(cnbc[refIndex].sm, res.kbestjump, smoo);
@@ -124,15 +147,7 @@ namespace coralns
       //expandpiecewiseconstant(smoo.jumps, smoo.smooth, res.smooth);
       
       // Output matrix
-      std::string outFileName = c.outprefix + "." + cnbc[refIndex].chr + ".raw.gz";
-      boost::iostreams::filtering_ostream dataOut;
-      dataOut.push(boost::iostreams::gzip_compressor());
-      dataOut.push(boost::iostreams::file_sink(outFileName.c_str(), std::ios_base::out | std::ios_base::binary));
-      dataOut << "chr\tstart\tend\tsignal\tsample" << std::endl;
-      for(uint32_t i = 0; i < cnbc[refIndex].rows; ++i) 
-	for(uint32_t j = 0; j < cnbc[refIndex].cols; ++j) 
-	  dataOut << cnbc[refIndex].chr << '\t' << cnbc[refIndex].itv[i].istart << '\t' << cnbc[refIndex].itv[i].iend << '\t' << cnbc[refIndex].sm[i][j] << "\tS" << j << std::endl;
-      outFileName = c.outprefix + "." + cnbc[refIndex].chr + ".smooth.gz";
+      std::string outFileName = c.outprefix + "." + cnbc[refIndex].chr + ".smooth.gz";
       boost::iostreams::filtering_ostream dataOutS;
       dataOutS.push(boost::iostreams::gzip_compressor());
       dataOutS.push(boost::iostreams::file_sink(outFileName.c_str(), std::ios_base::out | std::ios_base::binary));
@@ -143,8 +158,8 @@ namespace coralns
 	uint32_t iend = cnbc[refIndex].itv[smoo.jumps[i]].iend;
 	for(uint32_t j = 0; j < cnbc[refIndex].cols; ++j) {
 	  std::string type = "neutral";
-	  if (smoo.smooth[i][j] > 0) type = "gain";
-	  else if (smoo.smooth[i][j] < 0) type = "loss";
+	  if (smoo.smooth[i][j] > 0.5) type = "gain";
+	  else if (smoo.smooth[i][j] < -0.5) type = "loss";
 	  dataOutS << cnbc[refIndex].chr << '\t' << istart << '\t' << iend << '\t' << smoo.smooth[i][j] << "\tS" << j << "\t" << type << std::endl;
 	}
       }
