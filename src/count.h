@@ -355,7 +355,7 @@ namespace coralns
     typedef std::vector<ScanWindow> TWindowCounts;
     typedef std::vector<TWindowCounts> TGenomicWindowCounts;
     TGenomicWindowCounts scanCounts(c.nchr, TWindowCounts());
-    scan(c, scanCounts);
+    scan(c, li, scanCounts);
     
     // Select stable windows
     selectWindows(scanCounts);

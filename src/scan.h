@@ -56,14 +56,14 @@ namespace coralns
     std::sort(absdev.begin(), absdev.end());
     uint32_t mad = absdev[absdev.size() / 2];
     uint32_t lowerBound = 0;
-    if (2 * mad < median) lowerBound = median - 2 * mad;
-    uint32_t upperBound = median + 2 * mad;
+    if (mad < median) lowerBound = median - mad;
+    uint32_t upperBound = median + mad;
     return std::make_pair(lowerBound, upperBound);
   }
 
   template<typename TConfig>
   inline void
-  scan(TConfig const& c, std::vector< std::vector<ScanWindow> >& scanCounts) {
+  scan(TConfig const& c, LibraryInfo const& li, std::vector< std::vector<ScanWindow> >& scanCounts) {
 
     // Load bam file
     samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
@@ -90,7 +90,7 @@ namespace coralns
       // Check presence in mappability map
       std::string tname(hdr->target_name[refIndex]);
       int32_t seqlen = faidx_seq_len(faiMap, tname.c_str());
-      if (seqlen == - 1) continue;
+      if (seqlen == -1) continue;
       else seqlen = -1;
       char* seq = faidx_fetch_seq(faiMap, tname.c_str(), 0, faidx_seq_len(faiMap, tname.c_str()), &seqlen);
 
@@ -143,6 +143,7 @@ namespace coralns
 	if (rec->core.qual < c.minQual) continue;
 
 	int32_t midPoint = rec->core.pos + halfAlignmentLength(rec);
+	int32_t isize = 0;
 	if (rec->core.flag & BAM_FPAIRED) {
 	  // Clean-up the read store for identical alignment positions
 	  if (rec->core.pos > lastAlignedPos) {
@@ -162,10 +163,11 @@ namespace coralns
 	    if ((mateMap.find(hv) == mateMap.end()) || (!mateMap[hv])) continue; // Mate discarded
 	    mateMap[hv] = false;
 	  }
-
-	  // Isize not accurate so use a best guess
-	  if (rec->core.flag & BAM_FREVERSE) midPoint = rec->core.pos + alignmentLength(rec) - (c.meanisize / 2);
-	  else midPoint = rec->core.pos + (c.meanisize / 2);
+	  // Insert size filter
+	  isize = (rec->core.pos + alignmentLength(rec)) - rec->core.mpos;
+	  if ((li.minNormalISize < isize) && (isize < li.maxNormalISize)) {
+	    midPoint = rec->core.mpos + (int32_t) (isize/2);
+	  } else continue;
 	}
 
 	// Count fragment
