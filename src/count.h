@@ -34,6 +34,7 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include <htslib/sam.h>
 #include <htslib/faidx.h>
 
+#include "bed.h"
 #include "version.h"
 #include "scan.h"
 #include "util.h"
@@ -44,6 +45,7 @@ namespace coralns
 
   struct CountDNAConfig {
     bool hasStatsFile;
+    bool hasBedFile;
     uint32_t nchr;
     uint32_t meanisize;
     uint32_t window_size;
@@ -59,6 +61,7 @@ namespace coralns
     boost::filesystem::path statsFile;
     boost::filesystem::path mapFile;
     boost::filesystem::path bamFile;
+    boost::filesystem::path bedFile;
     boost::filesystem::path outfile;
   };
 
@@ -72,6 +75,17 @@ namespace coralns
     hts_idx_t* idx = sam_index_load(samfile, c.bamFile.string().c_str());
     bam_hdr_t* hdr = sam_hdr_read(samfile);
 
+    // BED regions
+    typedef boost::icl::interval_set<uint32_t> TChrIntervals;
+    typedef std::vector<TChrIntervals> TRegionsGenome;
+    TRegionsGenome bedRegions;
+    if (c.hasBedFile) {
+      if (!_parseBedIntervals(c, hdr, bedRegions)) {
+	std::cerr << "Couldn't parse BED intervals. Do the chromosome names match?" << std::endl;
+	return 1;
+      }
+    }
+    
     // Parse BAM file
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Count fragments" << std::endl;
@@ -203,25 +217,56 @@ namespace coralns
       hts_itr_destroy(iter);
       mateMap.clear();
 
-      for(uint32_t start = 0; start < hdr->target_len[refIndex]; start = start + c.window_offset) {
-	if (start + c.window_size < hdr->target_len[refIndex]) {
-	  double covsum = 0;
-	  double expcov = 0;
-	  double obsexp = 0;
-	  int32_t winlen = 0;
-	  for(uint32_t pos = start; pos < start + c.window_size; ++pos) {
-	    if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] == c.meanisize)) {
-	      covsum += cov[pos];
-	      obsexp += gcbias[gcContent[pos]].obsexp;
-	      expcov += gcbias[gcContent[pos]].coverage;
-	      ++winlen;
+      if (c.hasBedFile) {
+	for (int32_t refIndex = 0; refIndex < hdr->n_targets; ++refIndex) {
+	  for(typename TChrIntervals::iterator it = bedRegions[refIndex].begin(); it != bedRegions[refIndex].end(); ++it) {
+	    std::cerr << hdr->target_name[refIndex] << ',' << it->lower() << ',' << it->upper() << std::endl;
+	    if (it->lower() < it->upper()) {
+	      if ((it->lower() >= 0) && (it->upper() < hdr->target_len[refIndex])) {
+		double covsum = 0;
+		double expcov = 0;
+		double obsexp = 0;
+		uint32_t winlen = 0;
+		for(uint32_t pos = it->lower(); pos < it->upper(); ++pos) {
+		  if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] == c.meanisize)) {
+		    covsum += cov[pos];
+		    obsexp += gcbias[gcContent[pos]].obsexp;
+		    expcov += gcbias[gcContent[pos]].coverage;
+		    ++winlen;
+		  }
+		}
+		if (2 * winlen > (it->upper() - it->lower())) {
+		  obsexp /= (double) winlen;
+		  double count = ((double) covsum / obsexp ) * (double) (it->upper() - it->lower()) / (double) winlen;
+		  double cn = 2 * covsum / expcov;
+		  dataOut << std::string(hdr->target_name[refIndex]) << "\t" << it->lower() << "\t" << it->upper() << "\t" << count << "\t" << cn << std::endl;
+		}
+	      }
 	    }
 	  }
-	  if (2 * winlen > c.window_size) {
-	    obsexp /= (double) winlen;
-	    double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
-	    double cn = 2 * covsum / expcov;
-	    dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (start + c.window_size) << "\t" << count << "\t" << cn << std::endl;
+	}
+      } else {
+	// Use windows
+	for(uint32_t start = 0; start < hdr->target_len[refIndex]; start = start + c.window_offset) {
+	  if (start + c.window_size < hdr->target_len[refIndex]) {
+	    double covsum = 0;
+	    double expcov = 0;
+	    double obsexp = 0;
+	    uint32_t winlen = 0;
+	    for(uint32_t pos = start; pos < start + c.window_size; ++pos) {
+	      if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] == c.meanisize)) {
+		covsum += cov[pos];
+		obsexp += gcbias[gcContent[pos]].obsexp;
+		expcov += gcbias[gcContent[pos]].coverage;
+		++winlen;
+	      }
+	    }
+	    if (2 * winlen > c.window_size) {
+	      obsexp /= (double) winlen;
+	      double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
+	      double cn = 2 * covsum / expcov;
+	      dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (start + c.window_size) << "\t" << count << "\t" << cn << std::endl;
+	    }
 	  }
 	}
       }
@@ -257,6 +302,7 @@ namespace coralns
     window.add_options()
       ("window-size,i", boost::program_options::value<uint32_t>(&c.window_size)->default_value(10000), "window size")
       ("window-offset,j", boost::program_options::value<uint32_t>(&c.window_offset)->default_value(10000), "window offset")
+      ("bed-intervals,b", boost::program_options::value<boost::filesystem::path>(&c.bedFile), "input BED file")
       ;
 
     boost::program_options::options_description gcopt("GC options");
@@ -305,15 +351,23 @@ namespace coralns
     if (vm.count("statsfile")) c.hasStatsFile = true;
     else c.hasStatsFile = false;
 
+    
+    // BED intervals
+    if (vm.count("bed-intervals")) c.hasBedFile = true;
+    else c.hasBedFile = false;
+
+    
     // Open stats file
     boost::iostreams::filtering_ostream statsOut;
     if (c.hasStatsFile) {
       statsOut.push(boost::iostreams::gzip_compressor());
       statsOut.push(boost::iostreams::file_sink(c.statsFile.string().c_str(), std::ios_base::out | std::ios_base::binary));
     }
-    
-    // Check bam file
+
+    // Library info
     LibraryInfo li;
+
+    // Check bam file
     if (!(boost::filesystem::exists(c.bamFile) && boost::filesystem::is_regular_file(c.bamFile) && boost::filesystem::file_size(c.bamFile))) {
       std::cerr << "Alignment file is missing: " << c.bamFile.string() << std::endl;
       return 1;
@@ -344,7 +398,7 @@ namespace coralns
       if (c.hasStatsFile) {
 	statsOut << "LP\t" << li.rs << ',' << li.median << ',' << li.mad << ',' << li.minNormalISize << ',' << li.maxNormalISize << std::endl;
       }
-	
+
       // Clean-up
       bam_hdr_destroy(hdr);
       hts_idx_destroy(idx);
