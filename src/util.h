@@ -53,13 +53,9 @@ namespace coralns
     int32_t start;
     int32_t end;
     uint32_t cov;
-    uint32_t rplus;
-    uint32_t nonrplus;
     uint32_t uniqcov;
-    double layoutratio;
-    double uniqratio;
 
-    ScanWindow() : select(false), start(0), end(0), cov(0), rplus(0), nonrplus(0), uniqcov(0), layoutratio(0), uniqratio(0) {}
+    ScanWindow() : select(false), start(0), end(0), cov(0), uniqcov(0) {}
   };
     
   struct LibraryInfo {

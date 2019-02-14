@@ -56,7 +56,7 @@ namespace coralns
     uint16_t minQual;
     uint16_t mad;
     float exclgc;
-    float alignmentQ;
+    float fracUnique;
     std::string sampleName;
     boost::filesystem::path genome;
     boost::filesystem::path statsFile;
@@ -311,6 +311,7 @@ namespace coralns
       ("scan-window,c", boost::program_options::value<uint32_t>(&c.scanWindow)->default_value(10000), "scanning window size")
       ("scan-regions,r", boost::program_options::value<boost::filesystem::path>(&c.scanFile), "scanning regions in BED format")
       ("mad-cutoff,d", boost::program_options::value<uint16_t>(&c.mad)->default_value(9), "median + 9 * mad count cutoff")
+      ("fraction-unique,f", boost::program_options::value<float>(&c.fracUnique)->default_value(0.5), "fraction unique [0,1]")
       ("percentile,p", boost::program_options::value<float>(&c.exclgc)->default_value(0.0005), "excl. extreme GC fraction")
       ;      
 
@@ -417,14 +418,14 @@ namespace coralns
     scan(c, li, scanCounts);
     
     // Select stable windows
-    if (!c.hasScanFile) selectWindows(scanCounts);
+    if (!c.hasScanFile) selectWindows(c, scanCounts);
     if (c.hasStatsFile) {
       samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
       bam_hdr_t* hdr = sam_hdr_read(samfile);
-      statsOut << "SW\tchrom\tstart\tend\tselected\tcoverage\trplus\tnonrplus\tuniqcov\tlayoutratio\tuniqratio" <<  std::endl;
+      statsOut << "SW\tchrom\tstart\tend\tselected\tcoverage\tuniqcov" <<  std::endl;
       for(uint32_t refIndex = 0; refIndex < (uint32_t) hdr->n_targets; ++refIndex) {
 	for(uint32_t i = 0; i < scanCounts[refIndex].size(); ++i) {
-	  statsOut << "SW\t" <<  hdr->target_name[refIndex] << '\t' << scanCounts[refIndex][i].start << '\t' << scanCounts[refIndex][i].end << '\t' << scanCounts[refIndex][i].select << '\t' << scanCounts[refIndex][i].cov << '\t' << scanCounts[refIndex][i].rplus << '\t' << scanCounts[refIndex][i].nonrplus << '\t' << scanCounts[refIndex][i].uniqcov << '\t' << scanCounts[refIndex][i].layoutratio << '\t' << scanCounts[refIndex][i].uniqratio << std::endl;
+	  statsOut << "SW\t" <<  hdr->target_name[refIndex] << '\t' << scanCounts[refIndex][i].start << '\t' << scanCounts[refIndex][i].end << '\t' << scanCounts[refIndex][i].select << '\t' << scanCounts[refIndex][i].cov << '\t' << scanCounts[refIndex][i].uniqcov << std::endl;
 	}
       }
       bam_hdr_destroy(hdr);

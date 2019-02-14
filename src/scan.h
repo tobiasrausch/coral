@@ -163,6 +163,7 @@ namespace coralns
 	if (rec->core.flag & (BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FSUPPLEMENTARY | BAM_FUNMAP)) continue;
 	if ((rec->core.flag & BAM_FPAIRED) && ((rec->core.flag & BAM_FMUNMAP) || (rec->core.tid != rec->core.mtid))) continue;
 	if (rec->core.qual < c.minQual) continue;
+	if (getLayout(rec->core) != 2) continue;
 
 	int32_t midPoint = rec->core.pos + halfAlignmentLength(rec);
 	int32_t isize = 0;
@@ -185,6 +186,7 @@ namespace coralns
 	    if ((mateMap.find(hv) == mateMap.end()) || (!mateMap[hv])) continue; // Mate discarded
 	    mateMap[hv] = false;
 	  }
+
 	  // Insert size filter
 	  isize = (rec->core.pos + alignmentLength(rec)) - rec->core.mpos;
 	  if ((li.minNormalISize < isize) && (isize < li.maxNormalISize)) {
@@ -210,8 +212,6 @@ namespace coralns
 	    if (bin >= allbins) continue;
 	  }
 	  ++scanCounts[refIndex][bin].cov;
-	  if (getLayout(rec->core) == 2) ++scanCounts[refIndex][bin].rplus;
-	  else ++scanCounts[refIndex][bin].nonrplus;
 	  if (uniqContent[midPoint] == c.meanisize) ++scanCounts[refIndex][bin].uniqcov;
 	}
       }
@@ -229,24 +229,18 @@ namespace coralns
   }
 
 
+  template<typename TConfig>
   inline void
-  selectWindows(std::vector< std::vector<ScanWindow> >& scanCounts) {
+  selectWindows(TConfig const& c, std::vector< std::vector<ScanWindow> >& scanCounts) {
 
     // Pre-screen using PE layout, uniqueness and percent identity
     for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) {
       for(uint32_t i = 0; i<scanCounts[refIndex].size(); ++i) {
-	// Layout
-	double totalPairs = scanCounts[refIndex][i].rplus + scanCounts[refIndex][i].nonrplus;
-	scanCounts[refIndex][i].layoutratio = 0;
-	if (totalPairs > 0) scanCounts[refIndex][i].layoutratio = (double) scanCounts[refIndex][i].rplus / totalPairs;
 	// Uniqueness
-	scanCounts[refIndex][i].uniqratio = 0;
-	if (scanCounts[refIndex][i].cov > 0) scanCounts[refIndex][i].uniqratio = (double) scanCounts[refIndex][i].uniqcov / scanCounts[refIndex][i].cov;
-	if ((scanCounts[refIndex][i].layoutratio > 0.999) && (scanCounts[refIndex][i].uniqratio > 0.99)) {
-	  scanCounts[refIndex][i].select = true;
-	} else {
-	  scanCounts[refIndex][i].select = false;
-	}
+	double uniqratio = 0;
+	if (scanCounts[refIndex][i].cov > 0) uniqratio = (double) scanCounts[refIndex][i].uniqcov / scanCounts[refIndex][i].cov;
+	if (uniqratio > c.fracUnique) scanCounts[refIndex][i].select = true;
+	else scanCounts[refIndex][i].select = false;
       }
     }
     
