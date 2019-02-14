@@ -137,28 +137,6 @@ namespace coralns
 	  if ((ref[i] == 'c') || (ref[i] == 'C') || (ref[i] == 'g') || (ref[i] == 'G')) gcref[i] = 1;
 	}
 
-	/*
-	// Blacklist regions
-	typedef boost::icl::interval_set<uint32_t> TChrIntervals;
-	typedef std::vector<TChrIntervals> TRegionsGenome;
-	TRegionsGenome blacklistRegions;
-	std::string blf("/opt/dev/sc/LCR-hs38.bed");
-	if (!_parseBedIntervals(blf, true, hdr, blacklistRegions)) {
-	  std::cerr << "Couldn't parse BED intervals. Do the chromosome names match?" << std::endl;
-	    return 1;
-	}
-	for(typename TChrIntervals::iterator it = blacklistRegions[refIndex].begin(); it != blacklistRegions[refIndex].end(); ++it) {
-	  std::cerr << hdr->target_name[refIndex] << ',' << it->lower() << ',' << it->upper() << std::endl;
-	  if (it->lower() < it->upper()) {
-	    if ((it->lower() >= 0) && (it->upper() < hdr->target_len[refIndex])) {
-	      for(uint32_t k = it->lower(); k < it->upper(); ++k) {
-		uniq[k] = 0;
-	      }
-	    }
-	  }
-	}
-	*/
-
 	// Sum across fragment
 	int32_t halfwin = (int32_t) (c.meanisize / 2);
 	int32_t usum = 0;
@@ -443,10 +421,10 @@ namespace coralns
     if (c.hasStatsFile) {
       samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
       bam_hdr_t* hdr = sam_hdr_read(samfile);
-      statsOut << "SW\tchrom\tstart\tend\tselected\tcoverage\trplus\tnonrplus\tuniqcov\tlayoutratio\tuniqratio\talignQ" <<  std::endl;
+      statsOut << "SW\tchrom\tstart\tend\tselected\tcoverage\trplus\tnonrplus\tuniqcov\tlayoutratio\tuniqratio" <<  std::endl;
       for(uint32_t refIndex = 0; refIndex < (uint32_t) hdr->n_targets; ++refIndex) {
 	for(uint32_t i = 0; i < scanCounts[refIndex].size(); ++i) {
-	  statsOut << "SW\t" <<  hdr->target_name[refIndex] << '\t' << scanCounts[refIndex][i].start << '\t' << scanCounts[refIndex][i].end << '\t' << scanCounts[refIndex][i].select << '\t' << scanCounts[refIndex][i].cov << '\t' << scanCounts[refIndex][i].rplus << '\t' << scanCounts[refIndex][i].nonrplus << '\t' << scanCounts[refIndex][i].uniqcov << '\t' << scanCounts[refIndex][i].layoutratio << '\t' << scanCounts[refIndex][i].uniqratio << '\t' << scanCounts[refIndex][i].alignQ << std::endl;
+	  statsOut << "SW\t" <<  hdr->target_name[refIndex] << '\t' << scanCounts[refIndex][i].start << '\t' << scanCounts[refIndex][i].end << '\t' << scanCounts[refIndex][i].select << '\t' << scanCounts[refIndex][i].cov << '\t' << scanCounts[refIndex][i].rplus << '\t' << scanCounts[refIndex][i].nonrplus << '\t' << scanCounts[refIndex][i].uniqcov << '\t' << scanCounts[refIndex][i].layoutratio << '\t' << scanCounts[refIndex][i].uniqratio << std::endl;
 	}
       }
       bam_hdr_destroy(hdr);

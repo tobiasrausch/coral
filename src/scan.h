@@ -101,7 +101,6 @@ namespace coralns
 
     // Iterate chromosomes
     faidx_t* faiMap = fai_load(c.mapFile.string().c_str());
-    faidx_t* faiRef = fai_load(c.genome.string().c_str());
     for(int32_t refIndex=0; refIndex < (int32_t) hdr->n_targets; ++refIndex) {
       ++show_progress;
       if (chrNoData(c, refIndex, idx)) continue;
@@ -117,12 +116,6 @@ namespace coralns
       else seqlen = -1;
       char* seq = faidx_fetch_seq(faiMap, tname.c_str(), 0, faidx_seq_len(faiMap, tname.c_str()), &seqlen);
 
-      // Check presence in reference
-      seqlen = faidx_seq_len(faiRef, tname.c_str());
-      if (seqlen == - 1) continue;
-      else seqlen = -1;
-      char* ref = faidx_fetch_seq(faiRef, tname.c_str(), 0, faidx_seq_len(faiRef, tname.c_str()), &seqlen);
-      
       // Get Mappability
       std::vector<uint16_t> uniqContent(hdr->target_len[refIndex], 0);
       {
@@ -220,7 +213,6 @@ namespace coralns
 	  if (getLayout(rec->core) == 2) ++scanCounts[refIndex][bin].rplus;
 	  else ++scanCounts[refIndex][bin].nonrplus;
 	  if (uniqContent[midPoint] == c.meanisize) ++scanCounts[refIndex][bin].uniqcov;
-	  scanCounts[refIndex][bin].alignQ += getPercentIdentity(rec, ref);
 	}
       }
       // Clean-up
@@ -230,7 +222,6 @@ namespace coralns
     }
 	  
     // clean-up
-    fai_destroy(faiRef);
     fai_destroy(faiMap);
     bam_hdr_destroy(hdr);
     hts_idx_destroy(idx);
@@ -251,10 +242,7 @@ namespace coralns
 	// Uniqueness
 	scanCounts[refIndex][i].uniqratio = 0;
 	if (scanCounts[refIndex][i].cov > 0) scanCounts[refIndex][i].uniqratio = (double) scanCounts[refIndex][i].uniqcov / scanCounts[refIndex][i].cov;
-	// Percent identity
-	if (scanCounts[refIndex][i].cov > 0) scanCounts[refIndex][i].alignQ /= scanCounts[refIndex][i].cov;
-	else scanCounts[refIndex][i].alignQ = 0;
-	if ((scanCounts[refIndex][i].layoutratio > 0.999) && (scanCounts[refIndex][i].uniqratio > 0.99) && (scanCounts[refIndex][i].alignQ > 0.99)) {
+	if ((scanCounts[refIndex][i].layoutratio > 0.999) && (scanCounts[refIndex][i].uniqratio > 0.99)) {
 	  scanCounts[refIndex][i].select = true;
 	} else {
 	  scanCounts[refIndex][i].select = false;
