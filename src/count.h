@@ -316,9 +316,9 @@ namespace coralns
       ("scan-window,c", boost::program_options::value<uint32_t>(&c.scanWindow)->default_value(10000), "scanning window size")
       ("scan-regions,r", boost::program_options::value<boost::filesystem::path>(&c.scanFile), "scanning regions in BED format")
       ("mad-cutoff,d", boost::program_options::value<uint16_t>(&c.mad)->default_value(9), "median + 9 * mad count cutoff")
-      ("fraction-unique,f", boost::program_options::value<float>(&c.fracUnique)->default_value(0.5), "fraction unique [0,1]")
+      ("fraction-unique,f", boost::program_options::value<float>(&c.fracUnique)->default_value(0.8), "fraction unique [0,1]")
       ("fraction-window,k", boost::program_options::value<float>(&c.fracWindow)->default_value(0.5), "fraction window [0,1]")
-      ("fragment-uniqueness,e", boost::program_options::value<float>(&c.fragmentUnique)->default_value(1.0), "fragment unique [0,1]")
+      ("fragment-uniqueness,e", boost::program_options::value<float>(&c.fragmentUnique)->default_value(0.97), "fragment unique [0,1]")
       ("percentile,p", boost::program_options::value<float>(&c.exclgc)->default_value(0.0005), "excl. extreme GC fraction")
       ;      
 
