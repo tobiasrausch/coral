@@ -174,7 +174,7 @@ namespace coralns
       // Get GC and Mappability
       std::vector<uint16_t> uniqContent(hdr->target_len[refIndex], 0);
       std::vector<uint16_t> gcContent(hdr->target_len[refIndex], 0);
-      {      
+      {
 	// Mappability map
 	typedef boost::dynamic_bitset<> TBitSet;
 	TBitSet uniq(hdr->target_len[refIndex], false);
@@ -273,7 +273,7 @@ namespace coralns
 
       // Summarize GC coverage for this chromosome
       for(uint32_t i = 0; i < hdr->target_len[refIndex]; ++i) {
-	if (uniqContent[i] == c.meanisize) {
+	if (uniqContent[i] >= c.fragmentUnique * c.meanisize) {
 	  // Valid bin?
 	  uint32_t bin = i / c.scanWindow;
 	  if (bin < scanCounts[refIndex].size()) {

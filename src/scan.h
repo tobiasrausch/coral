@@ -212,7 +212,7 @@ namespace coralns
 	    if (bin >= allbins) continue;
 	  }
 	  ++scanCounts[refIndex][bin].cov;
-	  if (uniqContent[midPoint] == c.meanisize) ++scanCounts[refIndex][bin].uniqcov;
+	  if (uniqContent[midPoint] >= c.fragmentUnique * c.meanisize) ++scanCounts[refIndex][bin].uniqcov;
 	}
       }
       // Clean-up

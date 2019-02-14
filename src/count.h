@@ -57,6 +57,8 @@ namespace coralns
     uint16_t mad;
     float exclgc;
     float fracUnique;
+    float fracWindow;
+    float fragmentUnique;
     std::string sampleName;
     boost::filesystem::path genome;
     boost::filesystem::path statsFile;
@@ -229,7 +231,7 @@ namespace coralns
 		double obsexp = 0;
 		uint32_t winlen = 0;
 		for(uint32_t pos = it->lower(); pos < it->upper(); ++pos) {
-		  if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] == c.meanisize)) {
+		  if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
 		    covsum += cov[pos];
 		    obsexp += gcbias[gcContent[pos]].obsexp;
 		    expcov += gcbias[gcContent[pos]].coverage;
@@ -255,14 +257,14 @@ namespace coralns
 	    double obsexp = 0;
 	    uint32_t winlen = 0;
 	    for(uint32_t pos = start; pos < start + c.window_size; ++pos) {
-	      if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] == c.meanisize)) {
+	      if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
 		covsum += cov[pos];
 		obsexp += gcbias[gcContent[pos]].obsexp;
 		expcov += gcbias[gcContent[pos]].coverage;
 		++winlen;
 	      }
 	    }
-	    if (2 * winlen > c.window_size) {
+	    if (winlen >= c.fracWindow * c.window_size) {
 	      obsexp /= (double) winlen;
 	      double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
 	      double cn = 2 * covsum / expcov;
@@ -280,7 +282,10 @@ namespace coralns
     hts_idx_destroy(idx);
     sam_close(samfile);
     dataOut.pop();
-    
+
+    // Done
+    now = boost::posix_time::second_clock::local_time();
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Done." << std::endl;
     return 0;
   }
 
@@ -312,6 +317,8 @@ namespace coralns
       ("scan-regions,r", boost::program_options::value<boost::filesystem::path>(&c.scanFile), "scanning regions in BED format")
       ("mad-cutoff,d", boost::program_options::value<uint16_t>(&c.mad)->default_value(9), "median + 9 * mad count cutoff")
       ("fraction-unique,f", boost::program_options::value<float>(&c.fracUnique)->default_value(0.5), "fraction unique [0,1]")
+      ("fraction-window,k", boost::program_options::value<float>(&c.fracWindow)->default_value(0.5), "fraction window [0,1]")
+      ("fragment-uniqueness,e", boost::program_options::value<float>(&c.fragmentUnique)->default_value(1.0), "fragment unique [0,1]")
       ("percentile,p", boost::program_options::value<float>(&c.exclgc)->default_value(0.0005), "excl. extreme GC fraction")
       ;      
 
