@@ -49,16 +49,16 @@ namespace coralns
 {
 
 
-  template<typename TConfig, typename TRegionsGenome>
+  template<typename TRegionsGenome>
   inline int32_t
-  _parseBedIntervals(TConfig const& c, bam_hdr_t* hdr, TRegionsGenome& bedRegions) {
+    _parseBedIntervals(std::string const& filename, bool const filePresent, bam_hdr_t* hdr, TRegionsGenome& bedRegions) {
     typedef typename TRegionsGenome::value_type TChrIntervals;
     typedef typename TChrIntervals::interval_type TIVal;
 
     int32_t intervals = 0;
-    if (c.hasBedFile) {
+    if (filePresent) {
       bedRegions.resize(hdr->n_targets, TChrIntervals());
-      std::ifstream chrFile(c.bedFile.string().c_str(), std::ifstream::in);
+      std::ifstream chrFile(filename.c_str(), std::ifstream::in);
       if (chrFile.is_open()) {
 	while (chrFile.good()) {
 	  std::string chrFromFile;

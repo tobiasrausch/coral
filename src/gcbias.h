@@ -174,12 +174,12 @@ namespace coralns
       // Get GC and Mappability
       std::vector<uint16_t> uniqContent(hdr->target_len[refIndex], 0);
       std::vector<uint16_t> gcContent(hdr->target_len[refIndex], 0);
-      {
+      {      
 	// Mappability map
 	typedef boost::dynamic_bitset<> TBitSet;
 	TBitSet uniq(hdr->target_len[refIndex], false);
 	for(uint32_t i = 0; i < hdr->target_len[refIndex]; ++i) {
-	  if (seq[i] == 'C') uniq[i] = 1;
+	  if (seq[i] == 'C') uniq[i] = true;
 	}
 
 	// GC map

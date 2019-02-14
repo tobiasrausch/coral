@@ -46,6 +46,7 @@ namespace coralns
   struct CountDNAConfig {
     bool hasStatsFile;
     bool hasBedFile;
+    bool hasScanFile;
     uint32_t nchr;
     uint32_t meanisize;
     uint32_t window_size;
@@ -62,6 +63,7 @@ namespace coralns
     boost::filesystem::path mapFile;
     boost::filesystem::path bamFile;
     boost::filesystem::path bedFile;
+    boost::filesystem::path scanFile;
     boost::filesystem::path outfile;
   };
 
@@ -80,7 +82,7 @@ namespace coralns
     typedef std::vector<TChrIntervals> TRegionsGenome;
     TRegionsGenome bedRegions;
     if (c.hasBedFile) {
-      if (!_parseBedIntervals(c, hdr, bedRegions)) {
+      if (!_parseBedIntervals(c.bedFile.string(), c.hasBedFile, hdr, bedRegions)) {
 	std::cerr << "Couldn't parse BED intervals. Do the chromosome names match?" << std::endl;
 	return 1;
       }
@@ -135,7 +137,29 @@ namespace coralns
 	  if ((ref[i] == 'c') || (ref[i] == 'C') || (ref[i] == 'g') || (ref[i] == 'G')) gcref[i] = 1;
 	}
 
-	// Sum across fragments
+	/*
+	// Blacklist regions
+	typedef boost::icl::interval_set<uint32_t> TChrIntervals;
+	typedef std::vector<TChrIntervals> TRegionsGenome;
+	TRegionsGenome blacklistRegions;
+	std::string blf("/opt/dev/sc/LCR-hs38.bed");
+	if (!_parseBedIntervals(blf, true, hdr, blacklistRegions)) {
+	  std::cerr << "Couldn't parse BED intervals. Do the chromosome names match?" << std::endl;
+	    return 1;
+	}
+	for(typename TChrIntervals::iterator it = blacklistRegions[refIndex].begin(); it != blacklistRegions[refIndex].end(); ++it) {
+	  std::cerr << hdr->target_name[refIndex] << ',' << it->lower() << ',' << it->upper() << std::endl;
+	  if (it->lower() < it->upper()) {
+	    if ((it->lower() >= 0) && (it->upper() < hdr->target_len[refIndex])) {
+	      for(uint32_t k = it->lower(); k < it->upper(); ++k) {
+		uniq[k] = 0;
+	      }
+	    }
+	  }
+	}
+	*/
+
+	// Sum across fragment
 	int32_t halfwin = (int32_t) (c.meanisize / 2);
 	int32_t usum = 0;
 	int32_t gcsum = 0;
@@ -220,7 +244,6 @@ namespace coralns
       if (c.hasBedFile) {
 	for (int32_t refIndex = 0; refIndex < hdr->n_targets; ++refIndex) {
 	  for(typename TChrIntervals::iterator it = bedRegions[refIndex].begin(); it != bedRegions[refIndex].end(); ++it) {
-	    std::cerr << hdr->target_name[refIndex] << ',' << it->lower() << ',' << it->upper() << std::endl;
 	    if (it->lower() < it->upper()) {
 	      if ((it->lower() >= 0) && (it->upper() < hdr->target_len[refIndex])) {
 		double covsum = 0;
@@ -308,6 +331,7 @@ namespace coralns
     boost::program_options::options_description gcopt("GC options");
     gcopt.add_options()
       ("scan-window,c", boost::program_options::value<uint32_t>(&c.scanWindow)->default_value(10000), "scanning window size")
+      ("scan-regions,r", boost::program_options::value<boost::filesystem::path>(&c.scanFile), "scanning regions in BED format")
       ("mad-cutoff,d", boost::program_options::value<uint16_t>(&c.mad)->default_value(9), "median + 9 * mad count cutoff")
       ("percentile,p", boost::program_options::value<float>(&c.exclgc)->default_value(0.0005), "excl. extreme GC fraction")
       ;      
@@ -356,6 +380,9 @@ namespace coralns
     if (vm.count("bed-intervals")) c.hasBedFile = true;
     else c.hasBedFile = false;
 
+    // Scan regions
+    if (vm.count("scan-regions")) c.hasScanFile = true;
+    else c.hasScanFile = false;
     
     // Open stats file
     boost::iostreams::filtering_ostream statsOut;
@@ -412,14 +439,14 @@ namespace coralns
     scan(c, li, scanCounts);
     
     // Select stable windows
-    selectWindows(scanCounts);
+    if (!c.hasScanFile) selectWindows(scanCounts);
     if (c.hasStatsFile) {
       samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
       bam_hdr_t* hdr = sam_hdr_read(samfile);
       statsOut << "SW\tchrom\tstart\tend\tselected\tcoverage\trplus\tnonrplus\tuniqcov\tlayoutratio\tuniqratio\talignQ" <<  std::endl;
       for(uint32_t refIndex = 0; refIndex < (uint32_t) hdr->n_targets; ++refIndex) {
 	for(uint32_t i = 0; i < scanCounts[refIndex].size(); ++i) {
-	  statsOut << "SW\t" <<  hdr->target_name[refIndex] << '\t' << i * c.scanWindow << '\t' << (i+1) * c.scanWindow << '\t' << scanCounts[refIndex][i].select << '\t' << scanCounts[refIndex][i].cov << '\t' << scanCounts[refIndex][i].rplus << '\t' << scanCounts[refIndex][i].nonrplus << '\t' << scanCounts[refIndex][i].uniqcov << '\t' << scanCounts[refIndex][i].layoutratio << '\t' << scanCounts[refIndex][i].uniqratio << '\t' << scanCounts[refIndex][i].alignQ << std::endl;
+	  statsOut << "SW\t" <<  hdr->target_name[refIndex] << '\t' << scanCounts[refIndex][i].start << '\t' << scanCounts[refIndex][i].end << '\t' << scanCounts[refIndex][i].select << '\t' << scanCounts[refIndex][i].cov << '\t' << scanCounts[refIndex][i].rplus << '\t' << scanCounts[refIndex][i].nonrplus << '\t' << scanCounts[refIndex][i].uniqcov << '\t' << scanCounts[refIndex][i].layoutratio << '\t' << scanCounts[refIndex][i].uniqratio << '\t' << scanCounts[refIndex][i].alignQ << std::endl;
 	}
       }
       bam_hdr_destroy(hdr);

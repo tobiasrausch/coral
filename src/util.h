@@ -50,6 +50,8 @@ namespace coralns
 
   struct ScanWindow {
     bool select;
+    int32_t start;
+    int32_t end;
     uint32_t cov;
     uint32_t rplus;
     uint32_t nonrplus;
@@ -57,6 +59,8 @@ namespace coralns
     double alignQ;
     double layoutratio;
     double uniqratio;
+
+    ScanWindow() : select(false), start(0), end(0), cov(0), rplus(0), nonrplus(0), uniqcov(0), alignQ(0), layoutratio(0), uniqratio(0) {}
   };
     
   struct LibraryInfo {
@@ -168,6 +172,41 @@ namespace coralns
     }
   }
 
+  inline bool
+  nContent(std::string const& s) {
+    for(uint32_t i = 0; i < s.size(); ++i) {
+      if ((s[i] == 'N') || (s[i] == 'n')) return true;
+    }
+    return false;
+  }
+
+  inline std::string
+  compressStr(std::string const& data) {
+    std::stringstream compressed;
+    std::stringstream origin(data);
+    boost::iostreams::filtering_streambuf<boost::iostreams::input> out;
+    out.push(boost::iostreams::gzip_compressor(boost::iostreams::gzip_params(boost::iostreams::gzip::best_speed)));
+    out.push(origin);
+    boost::iostreams::copy(out, compressed);
+    return compressed.str();
+  }
+  
+  inline double
+  entropy(std::string const& st) {
+    typedef double TPrecision;
+    std::vector<char> stvec(st.begin(), st.end());
+    std::set<char> alphabet(stvec.begin(), stvec.end());
+    TPrecision ent = 0;
+    for(std::set<char>::const_iterator c = alphabet.begin(); c != alphabet.end(); ++c) {
+      int ctr = 0;
+      for (std::vector<char>::const_iterator s = stvec.begin(); s != stvec.end(); ++s)
+	if (*s == *c) ++ctr;
+      TPrecision freq = (TPrecision) ctr / (TPrecision) stvec.size();
+      ent += (freq) * log(freq)/log(2);
+    }
+    return -ent;
+  }
+  
   template<typename TSignalMatrix>
   inline void
   expandpiecewiseconstant(std::vector<uint32_t> const& jumps, TSignalMatrix const& val, TSignalMatrix& res) {

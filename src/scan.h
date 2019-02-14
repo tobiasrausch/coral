@@ -71,6 +71,29 @@ namespace coralns
     hts_idx_t* idx = sam_index_load(samfile, c.bamFile.string().c_str());
     bam_hdr_t* hdr = sam_hdr_read(samfile);
 
+    // Pre-defined scanning windows
+    if (c.hasScanFile) {
+      typedef boost::icl::interval_set<uint32_t> TChrIntervals;
+      typedef std::vector<TChrIntervals> TRegionsGenome;
+      TRegionsGenome scanRegions;
+      if (!_parseBedIntervals(c.scanFile.string(), c.hasScanFile, hdr, scanRegions)) {
+	std::cerr << "Warning: Couldn't parse BED intervals. Do the chromosome names match?" << std::endl;
+      }
+      for (int32_t refIndex = 0; refIndex < hdr->n_targets; ++refIndex) {
+	for(typename TChrIntervals::iterator it = scanRegions[refIndex].begin(); it != scanRegions[refIndex].end(); ++it) {
+	  if (it->lower() < it->upper()) {
+	    if ((it->lower() >= 0) && (it->upper() < hdr->target_len[refIndex])) {
+	      ScanWindow sw;
+	      sw.start = it->lower();
+	      sw.end = it->upper();
+	      sw.select = true;
+	      scanCounts[refIndex].push_back(sw);
+	    }
+	  }
+	}
+      } 
+    }
+    
     // Parse BAM file
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Scanning Windows" << std::endl;
@@ -125,8 +148,14 @@ namespace coralns
       }
       
       // Bins on this chromosome
-      uint32_t allbins = hdr->target_len[refIndex] / c.scanWindow;
-      scanCounts[refIndex].resize(allbins, ScanWindow());
+      if (!c.hasScanFile) {
+	uint32_t allbins = hdr->target_len[refIndex] / c.scanWindow;
+	scanCounts[refIndex].resize(allbins, ScanWindow());
+	for(uint32_t i = 0; i < allbins; ++i) {
+	  scanCounts[refIndex][i].start = i * c.scanWindow;
+	  scanCounts[refIndex][i].end = (i+1) * c.scanWindow;
+	}
+      }
       
       // Mate map
       typedef boost::unordered_map<std::size_t, bool> TMateMap;
@@ -173,13 +202,25 @@ namespace coralns
 	// Count fragment
 	if ((midPoint >= 0) && (midPoint < (int32_t) hdr->target_len[refIndex])) {
 	  uint32_t bin = midPoint / c.scanWindow;
-	  if (bin < allbins) {
-	    ++scanCounts[refIndex][bin].cov;
-	    if (getLayout(rec->core) == 2) ++scanCounts[refIndex][bin].rplus;
-	    else ++scanCounts[refIndex][bin].nonrplus;
-	    if (uniqContent[midPoint] == c.meanisize) ++scanCounts[refIndex][bin].uniqcov;
-	    scanCounts[refIndex][bin].alignQ += getPercentIdentity(rec, ref);
+	  if (c.hasScanFile) {
+	    bool foundBin = false;
+	    for(uint32_t i = 0; i < scanCounts[refIndex].size(); ++i) {
+	      if ((scanCounts[refIndex][i].start <= midPoint) && (midPoint < scanCounts[refIndex][i].end)) {
+		foundBin = true;
+		bin = i;
+		break;
+	      }
+	    }
+	    if (!foundBin) continue;
+	  } else {
+	    uint32_t allbins = hdr->target_len[refIndex] / c.scanWindow;
+	    if (bin >= allbins) continue;
 	  }
+	  ++scanCounts[refIndex][bin].cov;
+	  if (getLayout(rec->core) == 2) ++scanCounts[refIndex][bin].rplus;
+	  else ++scanCounts[refIndex][bin].nonrplus;
+	  if (uniqContent[midPoint] == c.meanisize) ++scanCounts[refIndex][bin].uniqcov;
+	  scanCounts[refIndex][bin].alignQ += getPercentIdentity(rec, ref);
 	}
       }
       // Clean-up
