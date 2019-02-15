@@ -48,7 +48,7 @@ Contact: Tobias Rausch (rausch@embl.de)
 namespace coralns
 {
 
-
+  // Flattens overlapping intervals
   template<typename TRegionsGenome>
   inline int32_t
     _parseBedIntervals(std::string const& filename, bool const filePresent, bam_hdr_t* hdr, TRegionsGenome& bedRegions) {
@@ -75,6 +75,44 @@ namespace coralns
 		int32_t start = boost::lexical_cast<int32_t>(*tokIter++);
 		int32_t end = boost::lexical_cast<int32_t>(*tokIter++);
 		bedRegions[tid].insert(TIVal::right_open(start, end));
+		++intervals;
+	      }
+	    }
+	  }
+	}
+      }
+      chrFile.close();
+    }
+    return intervals;
+  }
+
+
+  // Keeps overlapping intervals
+  template<typename TRegionsGenome>
+  inline int32_t
+  _parsePotOverlappingIntervals(std::string const& filename, bool const filePresent, bam_hdr_t* hdr, TRegionsGenome& bedRegions) {
+    typedef typename TRegionsGenome::value_type TChrIntervals;
+	
+    int32_t intervals = 0;
+    if (filePresent) {
+      bedRegions.resize(hdr->n_targets, TChrIntervals());
+      std::ifstream chrFile(filename.c_str(), std::ifstream::in);
+      if (chrFile.is_open()) {
+	while (chrFile.good()) {
+	  std::string chrFromFile;
+	  getline(chrFile, chrFromFile);
+	  typedef boost::tokenizer< boost::char_separator<char> > Tokenizer;
+	  boost::char_separator<char> sep(" \t,;");
+	  Tokenizer tokens(chrFromFile, sep);
+	  Tokenizer::iterator tokIter = tokens.begin();
+	  if (tokIter!=tokens.end()) {
+	    std::string chrName = *tokIter++;
+	    int32_t tid = bam_name2id(hdr, chrName.c_str());
+	    if (tid >= 0) {
+	      if (tokIter!=tokens.end()) {
+		int32_t start = boost::lexical_cast<int32_t>(*tokIter++);
+		int32_t end = boost::lexical_cast<int32_t>(*tokIter++);
+		bedRegions[tid].insert(std::make_pair(start, end));
 		++intervals;
 	      }
 	    }

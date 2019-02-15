@@ -80,11 +80,11 @@ namespace coralns
     bam_hdr_t* hdr = sam_hdr_read(samfile);
 
     // BED regions
-    typedef boost::icl::interval_set<uint32_t> TChrIntervals;
+    typedef std::set<std::pair<uint32_t, uint32_t> > TChrIntervals;
     typedef std::vector<TChrIntervals> TRegionsGenome;
     TRegionsGenome bedRegions;
     if (c.hasBedFile) {
-      if (!_parseBedIntervals(c.bedFile.string(), c.hasBedFile, hdr, bedRegions)) {
+      if (!_parsePotOverlappingIntervals(c.bedFile.string(), c.hasBedFile, hdr, bedRegions)) {
 	std::cerr << "Couldn't parse BED intervals. Do the chromosome names match?" << std::endl;
 	return 1;
       }
@@ -224,26 +224,24 @@ namespace coralns
       if (c.hasBedFile) {
 	for (int32_t refIndex = 0; refIndex < hdr->n_targets; ++refIndex) {
 	  for(typename TChrIntervals::iterator it = bedRegions[refIndex].begin(); it != bedRegions[refIndex].end(); ++it) {
-	    if (it->lower() < it->upper()) {
-	      if ((it->lower() >= 0) && (it->upper() < hdr->target_len[refIndex])) {
-		double covsum = 0;
-		double expcov = 0;
-		double obsexp = 0;
-		uint32_t winlen = 0;
-		for(uint32_t pos = it->lower(); pos < it->upper(); ++pos) {
-		  if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
-		    covsum += cov[pos];
-		    obsexp += gcbias[gcContent[pos]].obsexp;
-		    expcov += gcbias[gcContent[pos]].coverage;
-		    ++winlen;
-		  }
+	    if ((it->first < it->second) && (it->second < hdr->target_len[refIndex])) {
+	      double covsum = 0;
+	      double expcov = 0;
+	      double obsexp = 0;
+	      uint32_t winlen = 0;
+	      for(uint32_t pos = it->first; pos < it->second; ++pos) {
+		if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
+		  covsum += cov[pos];
+		  obsexp += gcbias[gcContent[pos]].obsexp;
+		  expcov += gcbias[gcContent[pos]].coverage;
+		  ++winlen;
 		}
-		if (2 * winlen > (it->upper() - it->lower())) {
-		  obsexp /= (double) winlen;
-		  double count = ((double) covsum / obsexp ) * (double) (it->upper() - it->lower()) / (double) winlen;
-		  double cn = 2 * covsum / expcov;
-		  dataOut << std::string(hdr->target_name[refIndex]) << "\t" << it->lower() << "\t" << it->upper() << "\t" << count << "\t" << cn << std::endl;
-		}
+	      }
+	      if (2 * winlen > (it->second - it->first)) {
+		obsexp /= (double) winlen;
+		double count = ((double) covsum / obsexp ) * (double) (it->second - it->first) / (double) winlen;
+		double cn = 2 * covsum / expcov;
+		dataOut << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\t" << count << "\t" << cn << std::endl;
 	      }
 	    }
 	  }
