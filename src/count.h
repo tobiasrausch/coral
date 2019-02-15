@@ -47,6 +47,7 @@ namespace coralns
     bool hasStatsFile;
     bool hasBedFile;
     bool hasScanFile;
+    bool noScanWindowSelection;
     uint32_t nchr;
     uint32_t meanisize;
     uint32_t window_size;
@@ -222,27 +223,27 @@ namespace coralns
       mateMap.clear();
 
       if (c.hasBedFile) {
-	for (int32_t refIndex = 0; refIndex < hdr->n_targets; ++refIndex) {
-	  for(typename TChrIntervals::iterator it = bedRegions[refIndex].begin(); it != bedRegions[refIndex].end(); ++it) {
-	    if ((it->first < it->second) && (it->second < hdr->target_len[refIndex])) {
-	      double covsum = 0;
-	      double expcov = 0;
-	      double obsexp = 0;
-	      uint32_t winlen = 0;
-	      for(uint32_t pos = it->first; pos < it->second; ++pos) {
-		if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
-		  covsum += cov[pos];
-		  obsexp += gcbias[gcContent[pos]].obsexp;
-		  expcov += gcbias[gcContent[pos]].coverage;
-		  ++winlen;
-		}
+	for(typename TChrIntervals::iterator it = bedRegions[refIndex].begin(); it != bedRegions[refIndex].end(); ++it) {
+	  if ((it->first < it->second) && (it->second < hdr->target_len[refIndex])) {
+	    double covsum = 0;
+	    double expcov = 0;
+	    double obsexp = 0;
+	    uint32_t winlen = 0;
+	    for(uint32_t pos = it->first; pos < it->second; ++pos) {
+	      if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
+		covsum += cov[pos];
+		obsexp += gcbias[gcContent[pos]].obsexp;
+		expcov += gcbias[gcContent[pos]].coverage;
+		++winlen;
 	      }
-	      if (2 * winlen > (it->second - it->first)) {
-		obsexp /= (double) winlen;
-		double count = ((double) covsum / obsexp ) * (double) (it->second - it->first) / (double) winlen;
-		double cn = 2 * covsum / expcov;
-		dataOut << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\t" << count << "\t" << cn << std::endl;
-	      }
+	    }
+	    if (2 * winlen > (it->second - it->first)) {
+	      obsexp /= (double) winlen;
+	      double count = ((double) covsum / obsexp ) * (double) (it->second - it->first) / (double) winlen;
+	      double cn = 2 * covsum / expcov;
+	      dataOut << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\t" << count << "\t" << cn << std::endl;
+	    } else {
+	      dataOut << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\tNA\tNA" << std::endl;
 	    }
 	  }
 	}
@@ -318,6 +319,7 @@ namespace coralns
       ("scan-regions,r", boost::program_options::value<boost::filesystem::path>(&c.scanFile), "scanning regions in BED format")
       ("mad-cutoff,d", boost::program_options::value<uint16_t>(&c.mad)->default_value(9), "median + 9 * mad count cutoff")
       ("percentile,p", boost::program_options::value<float>(&c.exclgc)->default_value(0.0005), "excl. extreme GC fraction")
+      ("no-window-selection,n", "no scan window selection")
       ;      
 
     boost::program_options::options_description hidden("Hidden options");
@@ -367,6 +369,10 @@ namespace coralns
     // Scan regions
     if (vm.count("scan-regions")) c.hasScanFile = true;
     else c.hasScanFile = false;
+
+    // Scan window selection
+    if (vm.count("no-window-selection")) c.noScanWindowSelection = true;
+    else c.noScanWindowSelection = false;
     
     // Open stats file
     boost::iostreams::filtering_ostream statsOut;

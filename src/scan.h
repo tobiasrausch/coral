@@ -232,39 +232,47 @@ namespace coralns
   template<typename TConfig>
   inline void
   selectWindows(TConfig const& c, std::vector< std::vector<ScanWindow> >& scanCounts) {
-
-    // Pre-screen using PE layout, uniqueness and percent identity
-    for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) {
-      for(uint32_t i = 0; i<scanCounts[refIndex].size(); ++i) {
-	// Uniqueness
-	double uniqratio = 0;
-	if (scanCounts[refIndex][i].cov > 0) uniqratio = (double) scanCounts[refIndex][i].uniqcov / scanCounts[refIndex][i].cov;
-	if (uniqratio > c.uniqueToTotalCovRatio) scanCounts[refIndex][i].select = true;
-	else scanCounts[refIndex][i].select = false;
-      }
-    }
-
-    // Normalize user-defined scan windows to same length (10,000bp)
-    if (c.hasScanFile) {
+    if (c.noScanWindowSelection) {
+      // Select all windows
       for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) {
 	for(uint32_t i = 0; i<scanCounts[refIndex].size(); ++i) {
-	  double scale = (double) 10000 / (double) (scanCounts[refIndex][i].end - scanCounts[refIndex][i].start);
-	  scanCounts[refIndex][i].uniqcov *= scale;
-	  scanCounts[refIndex][i].cov *= scale;
+	  scanCounts[refIndex][i].select = true;
 	}
       }
-    }
-    
-    // Get "normal" coverage windows of CN2
-    typedef std::pair<uint32_t, uint32_t> TCountBounds;
-    TCountBounds cb = estCountBounds(scanCounts);
-    
-    // Select CN2 windows
-    for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) {
-      for(uint32_t i = 0; i<scanCounts[refIndex].size(); ++i) {
-	if (scanCounts[refIndex][i].select) {
-	  if ((scanCounts[refIndex][i].cov > cb.first) && (scanCounts[refIndex][i].cov < cb.second)) scanCounts[refIndex][i].select = true;
+    } else {
+      // Pre-screen using PE layout, uniqueness and percent identity
+      for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) {
+	for(uint32_t i = 0; i<scanCounts[refIndex].size(); ++i) {
+	  // Uniqueness
+	  double uniqratio = 0;
+	  if (scanCounts[refIndex][i].cov > 0) uniqratio = (double) scanCounts[refIndex][i].uniqcov / scanCounts[refIndex][i].cov;
+	  if (uniqratio > c.uniqueToTotalCovRatio) scanCounts[refIndex][i].select = true;
 	  else scanCounts[refIndex][i].select = false;
+	}
+      }
+      
+      // Normalize user-defined scan windows to same length (10,000bp)
+      if (c.hasScanFile) {
+	for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) {
+	  for(uint32_t i = 0; i<scanCounts[refIndex].size(); ++i) {
+	    double scale = (double) 10000 / (double) (scanCounts[refIndex][i].end - scanCounts[refIndex][i].start);
+	    scanCounts[refIndex][i].uniqcov *= scale;
+	    scanCounts[refIndex][i].cov *= scale;
+	  }
+	}
+      }
+      
+      // Get "normal" coverage windows of CN2
+      typedef std::pair<uint32_t, uint32_t> TCountBounds;
+      TCountBounds cb = estCountBounds(scanCounts);
+      
+      // Select CN2 windows
+      for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) {
+	for(uint32_t i = 0; i<scanCounts[refIndex].size(); ++i) {
+	  if (scanCounts[refIndex][i].select) {
+	    if ((scanCounts[refIndex][i].cov > cb.first) && (scanCounts[refIndex][i].cov < cb.second)) scanCounts[refIndex][i].select = true;
+	    else scanCounts[refIndex][i].select = false;
+	  }
 	}
       }
     }

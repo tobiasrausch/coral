@@ -17,6 +17,7 @@ for(chrname in unique(x$chr)) {
  p = p + geom_point(pch=21, size=0.5)
  p = p + ylab("Copy-number") + xlab(chrname)
  p = p + scale_x_continuous(labels=comma)
+ p = p + ylim(0,8)
  p = p + theme(axis.text.x = element_text(angle=45, hjust=1))
  ggsave(paste0("plot.", chrname, ".png"), width=24, height=6)
  print(warnings())

@@ -418,13 +418,12 @@ namespace coralns
 	  std::cerr << "Warning: Sample has a non-default paired-end layout!" << std::endl;
 	  std::cerr << "The expected paired-end orientation is   ---Read1--->      <---Read2---  which is the default illumina paired-end layout." << std::endl;
 	    
-	} else {
-	  li.median = median;
-	  li.mad = mad;
-	  li.maxNormalISize = median + (c.mad * mad);
-	  li.minNormalISize = 0;
-	  if (c.mad * mad < median) li.minNormalISize = median - (c.mad * mad);
 	}
+	li.median = median;
+	li.mad = mad;
+	li.maxNormalISize = median + (c.mad * mad);
+	li.minNormalISize = 0;
+	if (c.mad * mad < median) li.minNormalISize = median - (c.mad * mad);
       }
     }
 
