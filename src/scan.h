@@ -239,7 +239,7 @@ namespace coralns
 	// Uniqueness
 	double uniqratio = 0;
 	if (scanCounts[refIndex][i].cov > 0) uniqratio = (double) scanCounts[refIndex][i].uniqcov / scanCounts[refIndex][i].cov;
-	if (uniqratio > c.fracUnique) scanCounts[refIndex][i].select = true;
+	if (uniqratio > c.uniqueToTotalCovRatio) scanCounts[refIndex][i].select = true;
 	else scanCounts[refIndex][i].select = false;
       }
     }

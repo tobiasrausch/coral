@@ -56,7 +56,7 @@ namespace coralns
     uint16_t minQual;
     uint16_t mad;
     float exclgc;
-    float fracUnique;
+    float uniqueToTotalCovRatio;
     float fracWindow;
     float fragmentUnique;
     std::string sampleName;
@@ -301,6 +301,7 @@ namespace coralns
       ("sample,s", boost::program_options::value<std::string>(&c.sampleName)->default_value("NA12878"), "sample name")
       ("quality,q", boost::program_options::value<uint16_t>(&c.minQual)->default_value(10), "min. mapping quality")
       ("mappability,m", boost::program_options::value<boost::filesystem::path>(&c.mapFile), "input mappability map")
+      ("fragment,e", boost::program_options::value<float>(&c.fragmentUnique)->default_value(0.97), "min. fragment uniqueness [0,1]")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("cov.gz"), "coverage output file")
       ;
 
@@ -309,16 +310,15 @@ namespace coralns
       ("window-size,i", boost::program_options::value<uint32_t>(&c.window_size)->default_value(10000), "window size")
       ("window-offset,j", boost::program_options::value<uint32_t>(&c.window_offset)->default_value(10000), "window offset")
       ("bed-intervals,b", boost::program_options::value<boost::filesystem::path>(&c.bedFile), "input BED file")
+      ("fraction-window,k", boost::program_options::value<float>(&c.fracWindow)->default_value(0.5), "min. callable window fraction [0,1]")
       ;
 
     boost::program_options::options_description gcopt("GC options");
     gcopt.add_options()
       ("scan-window,c", boost::program_options::value<uint32_t>(&c.scanWindow)->default_value(10000), "scanning window size")
+      ("fraction-unique,f", boost::program_options::value<float>(&c.uniqueToTotalCovRatio)->default_value(0.8), "uniqueness filter for scan windows [0,1]")
       ("scan-regions,r", boost::program_options::value<boost::filesystem::path>(&c.scanFile), "scanning regions in BED format")
       ("mad-cutoff,d", boost::program_options::value<uint16_t>(&c.mad)->default_value(9), "median + 9 * mad count cutoff")
-      ("fraction-unique,f", boost::program_options::value<float>(&c.fracUnique)->default_value(0.8), "fraction unique [0,1]")
-      ("fraction-window,k", boost::program_options::value<float>(&c.fracWindow)->default_value(0.5), "fraction window [0,1]")
-      ("fragment-uniqueness,e", boost::program_options::value<float>(&c.fragmentUnique)->default_value(0.97), "fragment unique [0,1]")
       ("percentile,p", boost::program_options::value<float>(&c.exclgc)->default_value(0.0005), "excl. extreme GC fraction")
       ;      
 
