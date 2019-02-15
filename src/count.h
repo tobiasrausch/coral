@@ -423,7 +423,7 @@ namespace coralns
     scan(c, li, scanCounts);
     
     // Select stable windows
-    if (!c.hasScanFile) selectWindows(c, scanCounts);
+    selectWindows(c, scanCounts);
     if (c.hasStatsFile) {
       samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
       bam_hdr_t* hdr = sam_hdr_read(samfile);

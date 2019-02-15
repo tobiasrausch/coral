@@ -243,6 +243,17 @@ namespace coralns
 	else scanCounts[refIndex][i].select = false;
       }
     }
+
+    // Normalize user-defined scan windows to same length (10,000bp)
+    if (c.hasScanFile) {
+      for(uint32_t refIndex = 0; refIndex < scanCounts.size(); ++refIndex) {
+	for(uint32_t i = 0; i<scanCounts[refIndex].size(); ++i) {
+	  double scale = (double) 10000 / (double) (scanCounts[refIndex][i].end - scanCounts[refIndex][i].start);
+	  scanCounts[refIndex][i].uniqcov *= scale;
+	  scanCounts[refIndex][i].cov *= scale;
+	}
+      }
+    }
     
     // Get "normal" coverage windows of CN2
     typedef std::pair<uint32_t, uint32_t> TCountBounds;
