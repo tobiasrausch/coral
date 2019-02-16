@@ -292,6 +292,9 @@ namespace coralns
   int countReads(int argc, char **argv) {
     CountDNAConfig c;
 
+    //cov.q10.d3.p0.0005.f0.8.e0.95.k0.5.gz
+    //cov.q10.d3.p0.0005.f0.8.e0.97.k0.5.gz
+
     // Parameter
     boost::program_options::options_description generic("Generic options");
     generic.add_options()
@@ -317,7 +320,7 @@ namespace coralns
       ("scan-window,c", boost::program_options::value<uint32_t>(&c.scanWindow)->default_value(10000), "scanning window size")
       ("fraction-unique,f", boost::program_options::value<float>(&c.uniqueToTotalCovRatio)->default_value(0.8), "uniqueness filter for scan windows [0,1]")
       ("scan-regions,r", boost::program_options::value<boost::filesystem::path>(&c.scanFile), "scanning regions in BED format")
-      ("mad-cutoff,d", boost::program_options::value<uint16_t>(&c.mad)->default_value(9), "median + 9 * mad count cutoff")
+      ("mad-cutoff,d", boost::program_options::value<uint16_t>(&c.mad)->default_value(3), "median + 3 * mad count cutoff")
       ("percentile,p", boost::program_options::value<float>(&c.exclgc)->default_value(0.0005), "excl. extreme GC fraction")
       ("no-window-selection,n", "no scan window selection")
       ;      
