@@ -139,7 +139,7 @@ namespace coralns
 	  uniqContent[pos] = usum;
 	}
       }
-      
+
       // Bins on this chromosome
       if (!c.hasScanFile) {
 	uint32_t allbins = hdr->target_len[refIndex] / c.scanWindow;
@@ -218,7 +218,7 @@ namespace coralns
       // Clean-up
       bam_destroy1(rec);
       hts_itr_destroy(iter);
-      mateMap.clear();
+      if (seq != NULL) free(seq);
     }
 	  
     // clean-up

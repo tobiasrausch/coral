@@ -34,6 +34,7 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include <htslib/sam.h>
 #include <htslib/faidx.h>
 
+#include "cnv.h"
 #include "bed.h"
 #include "version.h"
 #include "scan.h"
@@ -48,6 +49,7 @@ namespace coralns
     bool hasBedFile;
     bool hasScanFile;
     bool noScanWindowSelection;
+    bool adaptiveWindowLength;
     uint32_t nchr;
     uint32_t meanisize;
     uint32_t window_size;
@@ -249,187 +251,57 @@ namespace coralns
 	  }
 	}
       } else {
-	// Find #mappable pos
-	uint32_t mappable = 0;
-	for(uint32_t pos = 0; pos < hdr->target_len[refIndex]; ++pos) {
-	  if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
-	    ++mappable;
-	  }
-	}
-	typedef std::vector<TCount> TCoverage;
-	TCoverage mapcov(mappable, 0);
-	std::vector<uint16_t> mapGcContent(mappable, 0);
-	{
-	  uint32_t mapIdx = 0;
+	// Use windows
+	if (c.adaptiveWindowLength) {
+	  double covsum = 0;
+	  double expcov = 0;
+	  double obsexp = 0;
+	  uint32_t winlen = 0;
+	  uint32_t start = 0;
 	  for(uint32_t pos = 0; pos < hdr->target_len[refIndex]; ++pos) {
 	    if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
-	      mapcov[mapIdx] = cov[pos];
-	      mapGcContent[mapIdx] = gcContent[pos];
-	      ++mapIdx;
+	      covsum += cov[pos];
+	      obsexp += gcbias[gcContent[pos]].obsexp;
+	      expcov += gcbias[gcContent[pos]].coverage;
+	      ++winlen;
 	    }
-	  }
-	}
-
-	// Find breakpoints
-	typedef boost::dynamic_bitset<> TBitSet;
-	TBitSet bp(mappable, false);
-
-	// Iterate a couple CNV sizes to find breakpoint regions
-	uint32_t boundarySize = 10000;
-	for(uint32_t cnvSize = c.minCnvSize; cnvSize <= 1000000; cnvSize = (uint32_t) (cnvSize * 1.3)) {
-	  double covsumLeft = 0;
-	  double expcovLeft = 0;
-	  double covsumMiddle = 0;
-	  double expcovMiddle = 0;
-	  double covsumRight = 0;
-	  double expcovRight = 0;
-	  for(int32_t pos = boundarySize; pos < (int32_t) mappable - boundarySize - cnvSize; ++pos) {
-	    if (pos == boundarySize) {
-	      for(int32_t i = 0; i<boundarySize; ++i) {
-		covsumLeft += mapcov[i];
-		expcovLeft += gcbias[mapGcContent[i]].coverage;
-	      }
-	      for(int32_t i = boundarySize; i < boundarySize + cnvSize; ++i) {
-		covsumMiddle += mapcov[i];
-		expcovMiddle += gcbias[mapGcContent[i]].coverage;
-	      }
-	      for(int32_t i = boundarySize + cnvSize; i < boundarySize + cnvSize + boundarySize; ++i) {
-		covsumRight += mapcov[i];
-		expcovRight += gcbias[mapGcContent[i]].coverage;
-	      }
-	    } else {
-	      covsumLeft -= mapcov[pos - boundarySize - 1];
-	      expcovLeft -= gcbias[mapGcContent[pos - boundarySize - 1]].coverage;
-	      covsumMiddle -= mapcov[pos - 1];
-	      expcovMiddle -= gcbias[mapGcContent[pos - 1]].coverage;
-	      covsumRight -= mapcov[pos + cnvSize - 1];
-	      expcovRight -= gcbias[mapGcContent[pos + cnvSize - 1]].coverage;
-	      covsumLeft += mapcov[pos];
-	      expcovLeft += gcbias[mapGcContent[pos]].coverage;
-	      covsumMiddle += mapcov[pos + cnvSize];
-	      expcovMiddle += gcbias[mapGcContent[pos + cnvSize]].coverage;
-	      covsumRight += mapcov[pos + cnvSize + boundarySize];
-	      expcovRight += gcbias[mapGcContent[pos + cnvSize + boundarySize]].coverage;
-	    }
-	    double cnLeft = 2 * covsumLeft / expcovLeft;
-	    double cnMiddle = 2 * covsumMiddle / expcovMiddle;
-	    double cnRight = 2 * covsumRight / expcovRight;
-	    if ((std::abs(cnLeft - cnRight) < 0.2) && (std::abs(cnLeft - cnMiddle) > 0.8) && (std::abs(cnRight - cnMiddle) > 0.8) && ((cnMiddle < 1.5) || (cnMiddle > 2.5))) {
-	      bp[pos + cnvSize / 2] = true;
-	    }
-	  }
-	}
-
-	// Get start and end of CNVs
-	int32_t svStart = -1;
-	int32_t svEnd = -1;
-	for(uint32_t i = 0; i < mappable; ++i) {
-	  if (bp[i]) {
-	    if (svStart != -1) svEnd = i;
-	    else {
-	      svStart = i;
-	      svEnd = i;
-	    }
-	  } else {
-	    if (svStart != -1) {
-	      if ((svStart < svEnd) && (svEnd - svStart > 50)) {
-		// Start from core region
-		int32_t offset = (int32_t) (0.2 * (svEnd - svStart));
-		svStart += offset;
-		svEnd -= offset;
-		if (svStart < svEnd) {
-		  double covsum = 0;
-		  double expcov = 0;
-		  for(int32_t pos = svStart; pos <= svEnd; ++pos) {
-		    covsum += mapcov[pos];
-		    expcov += gcbias[mapGcContent[pos]].coverage;
-		  }
-		  double cn = 2 * covsum / expcov;
-
-		  // Use x-drop extension
-		  double runningCn = cn;
-		  for(int32_t extension = 0; std::abs(runningCn - cn) < 0.2; ++extension) {
-		    double runningCnLeft = -1;
-		    double runningCnRight = -1;
-		    if (svStart > 0) {
-		      double covsumLeft = covsum + mapcov[svStart - 1];
-		      double expcovLeft = expcov + gcbias[mapGcContent[svStart - 1]].coverage;
-		      runningCnLeft =  2 * covsumLeft / expcovLeft;
-		    }
-		    if (svEnd + 1 < mappable) {
-		      double covsumRight = covsum + mapcov[svEnd + 1];
-		      double expcovRight = expcov + gcbias[mapGcContent[svEnd + 1]].coverage;
-		      runningCnRight = 2 * covsumRight / expcovRight;
-		    }
-		    if ((runningCnLeft != -1) && (runningCnRight != -1)) {
-		      if (std::abs(runningCnLeft - cn) < (runningCnRight - cn)) {
-			--svStart;
-			covsum += mapcov[svStart];
-			expcov += gcbias[mapGcContent[svStart]].coverage;
-		      } else {
-			++svEnd;
-			covsum += mapcov[svEnd];
-			expcov += gcbias[mapGcContent[svEnd]].coverage;
-		      }
-		    } else if (runningCnLeft != -1) {
-		      --svStart;
-		      covsum += mapcov[svStart];
-		      expcov += gcbias[mapGcContent[svStart]].coverage;
-		    } else if (runningCnRight != -1) {
-		      ++svEnd;
-		      covsum += mapcov[svEnd];
-		      expcov += gcbias[mapGcContent[svEnd]].coverage;
-		    } else break;
-		    runningCn = 2 * covsum / expcov;
-		  }
-
-		  // Remap position
-		  if ((svEnd - svStart) >= c.minCnvSize) {
-		    uint32_t mapIdx = 0;
-		    int32_t svStartHg = 0;
-		    int32_t svEndHg = 0;
-		    for(uint32_t pos = 0; pos < hdr->target_len[refIndex]; ++pos) {
-		      if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
-			if (mapIdx == svStart) svStartHg = pos;
-			if (mapIdx == svEnd) svEndHg = pos;
-			++mapIdx;
-		      }
-		    }
-		    std::cerr << svStartHg << '\t' << svEndHg << '\t' << cn << std::endl;
-		  }
-		}
-	      }
-	      svStart = -1;
-	      svEnd = -1;
-	    }
-	  }
-	}
-	
-	/*
-	// Use windows
-	for(uint32_t start = 0; start < hdr->target_len[refIndex]; start = start + c.window_offset) {
-	  if (start + c.window_size < hdr->target_len[refIndex]) {
-	    double covsum = 0;
-	    double expcov = 0;
-	    double obsexp = 0;
-	    uint32_t winlen = 0;
-	    for(uint32_t pos = start; pos < start + c.window_size; ++pos) {
-	      if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
-		covsum += cov[pos];
-		obsexp += gcbias[gcContent[pos]].obsexp;
-		expcov += gcbias[gcContent[pos]].coverage;
-		++winlen;
-	      }
-	    }
-	    if (winlen >= c.fracWindow * c.window_size) {
+	    if (winlen == c.window_size) {
 	      obsexp /= (double) winlen;
 	      double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
 	      double cn = 2 * covsum / expcov;
-	      dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (start + c.window_size) << "\t" << count << "\t" << cn << std::endl;
+	      dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << count << "\t" << cn << std::endl;
+	      // reset
+	      covsum = 0;
+	      expcov = 0;
+	      obsexp = 0;
+	      winlen = 0;
+	      start = pos + 1;
+	    }
+	  }
+	} else {
+	  for(uint32_t start = 0; start < hdr->target_len[refIndex]; start = start + c.window_offset) {
+	    if (start + c.window_size < hdr->target_len[refIndex]) {
+	      double covsum = 0;
+	      double expcov = 0;
+	      double obsexp = 0;
+	      uint32_t winlen = 0;
+	      for(uint32_t pos = start; pos < start + c.window_size; ++pos) {
+		if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
+		  covsum += cov[pos];
+		  obsexp += gcbias[gcContent[pos]].obsexp;
+		  expcov += gcbias[gcContent[pos]].coverage;
+		  ++winlen;
+		}
+	      }
+	      if (winlen >= c.fracWindow * c.window_size) {
+		obsexp /= (double) winlen;
+		double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
+		double cn = 2 * covsum / expcov;
+		dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (start + c.window_size) << "\t" << count << "\t" << cn << std::endl;
+	      }
 	    }
 	  }
 	}
-	*/
       }
     }
 	  
@@ -473,6 +345,7 @@ namespace coralns
       ("window-offset,j", boost::program_options::value<uint32_t>(&c.window_offset)->default_value(10000), "window offset")
       ("bed-intervals,b", boost::program_options::value<boost::filesystem::path>(&c.bedFile), "input BED file")
       ("fraction-window,k", boost::program_options::value<float>(&c.fracWindow)->default_value(0.5), "min. callable window fraction [0,1]")
+      ("adaptive-window-size,a", "use adaptive window size depending on mappability")
       ;
 
     boost::program_options::options_description gcopt("GC options");
@@ -536,6 +409,10 @@ namespace coralns
     // Scan window selection
     if (vm.count("no-window-selection")) c.noScanWindowSelection = true;
     else c.noScanWindowSelection = false;
+
+    // Adaptive window length
+    if (vm.count("adaptive-window-size")) c.adaptiveWindowLength = true;
+    else c.adaptiveWindowLength = false;
     
     // Open stats file
     boost::iostreams::filtering_ostream statsOut;
