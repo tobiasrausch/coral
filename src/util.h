@@ -48,6 +48,10 @@ Contact: Tobias Rausch (rausch@embl.de)
 namespace coralns
 {
 
+  #ifndef LAST_BIN
+  #define LAST_BIN 65535
+  #endif
+
   struct ScanWindow {
     bool select;
     int32_t start;
@@ -56,7 +60,32 @@ namespace coralns
     uint32_t uniqcov;
 
     ScanWindow() : select(false), start(0), end(0), cov(0), uniqcov(0) {}
+    ScanWindow(int32_t const s) : select(false), start(s), end(s+1), cov(0), uniqcov(0) {}
   };
+
+  template<typename TScanWindow>
+  struct SortScanWindow : public std::binary_function<TScanWindow, TScanWindow, bool>
+  {
+    inline bool operator()(TScanWindow const& sw1, TScanWindow const& sw2) {
+      return ((sw1.start<sw2.start) || ((sw1.start == sw2.start) && (sw1.end < sw2.end)));
+    }
+  };
+
+
+  template<typename TConfig>
+  inline int32_t
+  _findScanWindow(TConfig const& c, uint32_t const reflen, std::vector<uint16_t> const& binMap, int32_t const midPoint) {
+    if (c.hasScanFile) {
+      if (binMap[midPoint] == LAST_BIN) return -1;
+      else return binMap[midPoint];
+    } else {
+      uint32_t bin = midPoint / c.scanWindow;
+      uint32_t allbins = reflen / c.scanWindow;
+      if (bin >= allbins) return -1;
+      else return bin;
+    }
+    return -1;
+  }
     
   struct LibraryInfo {
     int32_t rs;

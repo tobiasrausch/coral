@@ -226,27 +226,61 @@ namespace coralns
       mateMap.clear();
 
       if (c.hasBedFile) {
-	for(typename TChrIntervals::iterator it = bedRegions[refIndex].begin(); it != bedRegions[refIndex].end(); ++it) {
-	  if ((it->first < it->second) && (it->second < hdr->target_len[refIndex])) {
-	    double covsum = 0;
-	    double expcov = 0;
-	    double obsexp = 0;
-	    uint32_t winlen = 0;
-	    for(uint32_t pos = it->first; pos < it->second; ++pos) {
-	      if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
-		covsum += cov[pos];
-		obsexp += gcbias[gcContent[pos]].obsexp;
-		expcov += gcbias[gcContent[pos]].coverage;
-		++winlen;
+	// Use bed file
+	if (c.adaptiveWindowLength) {
+	  double covsum = 0;
+	  double expcov = 0;
+	  double obsexp = 0;
+	  uint32_t winlen = 0;
+	  uint32_t start = 0;
+	  for(typename TChrIntervals::iterator it = bedRegions[refIndex].begin(); it != bedRegions[refIndex].end(); ++it) {
+	    if ((it->first < it->second) && (it->second < hdr->target_len[refIndex])) {
+	      for(uint32_t pos = it->first; pos < it->second; ++pos) {
+		if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
+		  if (winlen == 0) start = pos;
+		  covsum += cov[pos];
+		  obsexp += gcbias[gcContent[pos]].obsexp;
+		  expcov += gcbias[gcContent[pos]].coverage;
+		  ++winlen;
+		  if (winlen == c.window_size) {
+		    obsexp /= (double) winlen;
+		    double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
+		    double cn = 2 * covsum / expcov;
+		    dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << count << "\t" << cn << std::endl;
+		    // reset
+		    covsum = 0;
+		    expcov = 0;
+		    obsexp = 0;
+		    winlen = 0;
+		    start = pos + 1;
+		  }
+		}
 	      }
 	    }
-	    if (2 * winlen > (it->second - it->first)) {
-	      obsexp /= (double) winlen;
-	      double count = ((double) covsum / obsexp ) * (double) (it->second - it->first) / (double) winlen;
-	      double cn = 2 * covsum / expcov;
-	      dataOut << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\t" << count << "\t" << cn << std::endl;
-	    } else {
-	      dataOut << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\tNA\tNA" << std::endl;
+	  }
+	} else {
+	  for(typename TChrIntervals::iterator it = bedRegions[refIndex].begin(); it != bedRegions[refIndex].end(); ++it) {
+	    if ((it->first < it->second) && (it->second < hdr->target_len[refIndex])) {
+	      double covsum = 0;
+	      double expcov = 0;
+	      double obsexp = 0;
+	      uint32_t winlen = 0;
+	      for(uint32_t pos = it->first; pos < it->second; ++pos) {
+		if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
+		  covsum += cov[pos];
+		  obsexp += gcbias[gcContent[pos]].obsexp;
+		  expcov += gcbias[gcContent[pos]].coverage;
+		  ++winlen;
+		}
+	      }
+	      if (2 * winlen > (it->second - it->first)) {
+		obsexp /= (double) winlen;
+		double count = ((double) covsum / obsexp ) * (double) (it->second - it->first) / (double) winlen;
+		double cn = 2 * covsum / expcov;
+		dataOut << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\t" << count << "\t" << cn << std::endl;
+	      } else {
+		dataOut << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\tNA\tNA" << std::endl;
+	      }
 	    }
 	  }
 	}
@@ -264,18 +298,18 @@ namespace coralns
 	      obsexp += gcbias[gcContent[pos]].obsexp;
 	      expcov += gcbias[gcContent[pos]].coverage;
 	      ++winlen;
-	    }
-	    if (winlen == c.window_size) {
-	      obsexp /= (double) winlen;
-	      double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
-	      double cn = 2 * covsum / expcov;
-	      dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << count << "\t" << cn << std::endl;
-	      // reset
-	      covsum = 0;
-	      expcov = 0;
-	      obsexp = 0;
-	      winlen = 0;
-	      start = pos + 1;
+	      if (winlen == c.window_size) {
+		obsexp /= (double) winlen;
+		double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
+		double cn = 2 * covsum / expcov;
+		dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << count << "\t" << cn << std::endl;
+		// reset
+		covsum = 0;
+		expcov = 0;
+		obsexp = 0;
+		winlen = 0;
+		start = pos + 1;
+	      }
 	    }
 	  }
 	} else {

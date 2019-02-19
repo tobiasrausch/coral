@@ -158,6 +158,16 @@ namespace coralns
       ++show_progress;
       if (scanCounts[refIndex].empty()) continue;
 
+      // Bin map
+      std::vector<uint16_t> binMap;
+      if (c.hasScanFile) {
+	// Fill bin map
+	binMap.resize(hdr->target_len[refIndex], LAST_BIN);
+	for(uint32_t bin = 0;((bin < scanCounts[refIndex].size()) && (bin < LAST_BIN)); ++bin) {
+	  for(int32_t k = scanCounts[refIndex][bin].start; k < scanCounts[refIndex][bin].end; ++k) binMap[k] = bin;
+	}
+      }
+      
       // Check presence in mappability map
       std::string tname(hdr->target_name[refIndex]);
       int32_t seqlen = faidx_seq_len(faiMap, tname.c_str());
@@ -275,13 +285,11 @@ namespace coralns
       for(uint32_t i = 0; i < hdr->target_len[refIndex]; ++i) {
 	if (uniqContent[i] >= c.fragmentUnique * c.meanisize) {
 	  // Valid bin?
-	  uint32_t bin = i / c.scanWindow;
-	  if (bin < scanCounts[refIndex].size()) {
-	    if (scanCounts[refIndex][bin].select) {
-	      ++gcbias[gcContent[i]].reference;
-	      gcbias[gcContent[i]].sample += cov[i];
-	      gcbias[gcContent[i]].coverage += cov[i];
-	    }
+	  int32_t bin = _findScanWindow(c, hdr->target_len[refIndex], binMap, i);
+	  if ((bin >= 0) && (scanCounts[refIndex][bin].select)) {
+	    ++gcbias[gcContent[i]].reference;
+	    gcbias[gcContent[i]].sample += cov[i];
+	    gcbias[gcContent[i]].coverage += cov[i];
 	  }
 	}
       }

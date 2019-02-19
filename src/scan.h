@@ -91,7 +91,9 @@ namespace coralns
 	    }
 	  }
 	}
-      } 
+	// Sort scan windows
+	sort(scanCounts[refIndex].begin(), scanCounts[refIndex].end(), SortScanWindow<ScanWindow>());
+      }
     }
     
     // Parse BAM file
@@ -141,6 +143,7 @@ namespace coralns
       }
 
       // Bins on this chromosome
+      std::vector<uint16_t> binMap;
       if (!c.hasScanFile) {
 	uint32_t allbins = hdr->target_len[refIndex] / c.scanWindow;
 	scanCounts[refIndex].resize(allbins, ScanWindow());
@@ -148,8 +151,17 @@ namespace coralns
 	  scanCounts[refIndex][i].start = i * c.scanWindow;
 	  scanCounts[refIndex][i].end = (i+1) * c.scanWindow;
 	}
+      } else {
+	// Fill bin map
+	binMap.resize(hdr->target_len[refIndex], LAST_BIN);
+	if (scanCounts[refIndex].size() >= LAST_BIN) {
+	  std::cerr << "Warning: Too many scan windows on " << hdr->target_name[refIndex] << std::endl;
+	}
+	for(uint32_t bin = 0;((bin < scanCounts[refIndex].size()) && (bin < LAST_BIN)); ++bin) {
+	  for(int32_t k = scanCounts[refIndex][bin].start; k < scanCounts[refIndex][bin].end; ++k) binMap[k] = bin;
+	}
       }
-      
+	
       // Mate map
       typedef boost::unordered_map<std::size_t, bool> TMateMap;
       TMateMap mateMap;
@@ -196,23 +208,11 @@ namespace coralns
 
 	// Count fragment
 	if ((midPoint >= 0) && (midPoint < (int32_t) hdr->target_len[refIndex])) {
-	  uint32_t bin = midPoint / c.scanWindow;
-	  if (c.hasScanFile) {
-	    bool foundBin = false;
-	    for(uint32_t i = 0; i < scanCounts[refIndex].size(); ++i) {
-	      if ((scanCounts[refIndex][i].start <= midPoint) && (midPoint < scanCounts[refIndex][i].end)) {
-		foundBin = true;
-		bin = i;
-		break;
-	      }
-	    }
-	    if (!foundBin) continue;
-	  } else {
-	    uint32_t allbins = hdr->target_len[refIndex] / c.scanWindow;
-	    if (bin >= allbins) continue;
+	  int32_t bin = _findScanWindow(c, hdr->target_len[refIndex], binMap, midPoint);
+	  if (bin >= 0) {
+	    ++scanCounts[refIndex][bin].cov;
+	    if (uniqContent[midPoint] >= c.fragmentUnique * c.meanisize) ++scanCounts[refIndex][bin].uniqcov;
 	  }
-	  ++scanCounts[refIndex][bin].cov;
-	  if (uniqContent[midPoint] >= c.fragmentUnique * c.meanisize) ++scanCounts[refIndex][bin].uniqcov;
 	}
       }
       // Clean-up
