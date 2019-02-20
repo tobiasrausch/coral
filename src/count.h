@@ -302,7 +302,7 @@ namespace coralns
 		obsexp /= (double) winlen;
 		double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
 		double cn = 2 * covsum / expcov;
-		dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << count << "\t" << cn << std::endl;
+		dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << count << "\t" << (float) (cn) << std::endl;
 		// reset
 		covsum = 0;
 		expcov = 0;

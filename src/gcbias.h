@@ -52,7 +52,7 @@ namespace coralns
     double obsexp;
     double coverage;
 
-    GcBias() : sample(0), reference(0), fractionSample(0), fractionReference(0), percentileSample(0), percentileReference(0), obsexp(0) {}
+    GcBias() : sample(0), reference(0), fractionSample(0), fractionReference(0), percentileSample(0), percentileReference(0), obsexp(0), coverage(0) {}
   };
 
   template<typename TConfig>
