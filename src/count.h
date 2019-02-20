@@ -233,26 +233,63 @@ namespace coralns
 	  double obsexp = 0;
 	  uint32_t winlen = 0;
 	  uint32_t start = 0;
-	  for(typename TChrIntervals::iterator it = bedRegions[refIndex].begin(); it != bedRegions[refIndex].end(); ++it) {
-	    if ((it->first < it->second) && (it->second < hdr->target_len[refIndex])) {
-	      for(uint32_t pos = it->first; pos < it->second; ++pos) {
-		if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
-		  if (winlen == 0) start = pos;
-		  covsum += cov[pos];
-		  obsexp += gcbias[gcContent[pos]].obsexp;
-		  expcov += gcbias[gcContent[pos]].coverage;
-		  ++winlen;
-		  if (winlen == c.window_size) {
-		    obsexp /= (double) winlen;
-		    double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
-		    double cn = 2 * covsum / expcov;
-		    dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << count << "\t" << cn << std::endl;
-		    // reset
-		    covsum = 0;
-		    expcov = 0;
-		    obsexp = 0;
-		    winlen = 0;
-		    start = pos + 1;
+	  bool endOfWindow = true;
+	  typename TChrIntervals::iterator it = bedRegions[refIndex].begin();
+	  if (it != bedRegions[refIndex].end()) start = it->first;
+	  while(endOfWindow) {
+	    endOfWindow = false;
+	    for(it = bedRegions[refIndex].begin(); ((it != bedRegions[refIndex].end()) && (!endOfWindow)); ++it) {
+	      if ((it->first < it->second) && (it->second <= hdr->target_len[refIndex])) {
+		if (start >= it->second) {
+		  if (start == it->second) {
+		    // Special case
+		    typename TChrIntervals::iterator itNext = it;
+		    ++itNext;
+		    if (itNext != bedRegions[refIndex].end()) start = itNext->first;
+		  }
+		  continue;
+		}
+		for(uint32_t pos = it->first; ((pos < it->second) && (!endOfWindow)); ++pos) {
+		  if (pos < start) continue;
+		  if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
+		    covsum += cov[pos];
+		    obsexp += gcbias[gcContent[pos]].obsexp;
+		    expcov += gcbias[gcContent[pos]].coverage;
+		    ++winlen;
+		    if (winlen == c.window_size) {
+		      obsexp /= (double) winlen;
+		      double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
+		      double cn = 2 * covsum / expcov;
+		      dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << count << "\t" << cn << std::endl;
+		      // reset
+		      covsum = 0;
+		      expcov = 0;
+		      obsexp = 0;
+		      winlen = 0;
+		      if (c.window_offset == c.window_size) {
+			// Move on
+			start = pos + 1;
+			endOfWindow = true;
+		      } else {
+			// Rewind
+			for(typename TChrIntervals::iterator sit = bedRegions[refIndex].begin(); ((sit != bedRegions[refIndex].end()) && (!endOfWindow)); ++sit) {
+			  if ((sit->first < sit->second) && (sit->second <= hdr->target_len[refIndex])) {
+			    if (start >= sit->second) continue;
+			    for(uint32_t k = sit->first; ((k < sit->second) && (!endOfWindow)); ++k) {
+			      if (k < start) continue;
+			      if ((gcContent[k] > gcbound.first) && (gcContent[k] < gcbound.second) && (uniqContent[k] >= c.fragmentUnique * c.meanisize)) {
+				++winlen;
+				if (winlen == c.window_offset) {
+				  start = k + 1;
+				  winlen = 0;
+				  endOfWindow = true;
+				}
+			      }
+			    }
+			  }
+			}
+		      }
+		    }
 		  }
 		}
 	      }
@@ -260,7 +297,7 @@ namespace coralns
 	  }
 	} else {
 	  for(typename TChrIntervals::iterator it = bedRegions[refIndex].begin(); it != bedRegions[refIndex].end(); ++it) {
-	    if ((it->first < it->second) && (it->second < hdr->target_len[refIndex])) {
+	    if ((it->first < it->second) && (it->second <= hdr->target_len[refIndex])) {
 	      double covsum = 0;
 	      double expcov = 0;
 	      double obsexp = 0;
@@ -292,7 +329,8 @@ namespace coralns
 	  double obsexp = 0;
 	  uint32_t winlen = 0;
 	  uint32_t start = 0;
-	  for(uint32_t pos = 0; pos < hdr->target_len[refIndex]; ++pos) {
+	  uint32_t pos = 0;
+	  while(pos < hdr->target_len[refIndex]) {
 	    if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
 	      covsum += cov[pos];
 	      obsexp += gcbias[gcContent[pos]].obsexp;
@@ -308,9 +346,26 @@ namespace coralns
 		expcov = 0;
 		obsexp = 0;
 		winlen = 0;
-		start = pos + 1;
+		if (c.window_offset == c.window_size) {
+		  // Move on
+		  start = pos + 1;
+		} else {
+		  // Rewind
+		  for(uint32_t k = start; k < hdr->target_len[refIndex]; ++k) {
+		    if ((gcContent[k] > gcbound.first) && (gcContent[k] < gcbound.second) && (uniqContent[k] >= c.fragmentUnique * c.meanisize)) {
+		      ++winlen;
+		      if (winlen == c.window_offset) {
+			start = k + 1;
+			pos = k;
+			winlen = 0;
+			break;
+		      }
+		    }
+		  }
+		}
 	      }
 	    }
+	    ++pos;
 	  }
 	} else {
 	  for(uint32_t start = 0; start < hdr->target_len[refIndex]; start = start + c.window_offset) {
@@ -447,6 +502,11 @@ namespace coralns
     // Adaptive window length
     if (vm.count("adaptive-window-size")) c.adaptiveWindowLength = true;
     else c.adaptiveWindowLength = false;
+
+    // Check window size
+    if (c.window_offset > c.window_size) c.window_offset = c.window_size;
+    if (c.window_size == 0) c.window_size = 1;
+    if (c.window_offset == 0) c.window_offset = 1;
     
     // Open stats file
     boost::iostreams::filtering_ostream statsOut;
