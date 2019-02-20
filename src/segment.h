@@ -64,12 +64,12 @@ namespace coralns
 
     // Parse signal matrix
     uint32_t refIndex = 0;
-    uint32_t row = 0;
     
     std::vector<TPrecision> lastVal(cnbc[refIndex].cols, 0.0);
     std::ifstream signalFile(c.signal.string().c_str(), std::ifstream::in);
     cnbc[refIndex].sm.resize(boost::extents[cnbc[refIndex].rows][cnbc[refIndex].cols]);
     if (signalFile.is_open()) {
+      uint32_t row = 0;
       while (signalFile.good()) {
 	std::string sigdata;
 	getline(signalFile, sigdata);
@@ -85,11 +85,11 @@ namespace coralns
 	  Tokenizer tokens(sigdata, sep);
 	  Tokenizer::iterator tokIter = tokens.begin();
 	  if (tokIter!=tokens.end()) {
-	    std::string chrName = *tokIter++;
+	    ++tokIter;
 	    if (tokIter!=tokens.end()) {
-	      tokIter++;
+	      ++tokIter;
 	      if (tokIter!=tokens.end()) {
-		tokIter++;
+		++tokIter;
 		uint32_t col = 0;
 		for(;tokIter != tokens.end(); ++tokIter, ++col) {
 		  if (col < cnbc[refIndex].cols) {

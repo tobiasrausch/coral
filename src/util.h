@@ -60,7 +60,7 @@ namespace coralns
     uint32_t uniqcov;
 
     ScanWindow() : select(false), start(0), end(0), cov(0), uniqcov(0) {}
-    ScanWindow(int32_t const s) : select(false), start(s), end(s+1), cov(0), uniqcov(0) {}
+    explicit ScanWindow(int32_t const s) : select(false), start(s), end(s+1), cov(0), uniqcov(0) {}
   };
 
   template<typename TScanWindow>
@@ -431,15 +431,13 @@ namespace coralns
       std::sort(readSize.begin(), readSize.end());
       li.rs = readSize[readSize.size() / 2];
     }
-    int32_t median = 0;
-    int32_t mad = 0;
     if (processedNumPairs >= minNumAlignments) {
       std::sort(vecISize.begin(), vecISize.end());
-      median = vecISize[vecISize.size() / 2];
+      int32_t median = vecISize[vecISize.size() / 2];
       std::vector<uint32_t> absDev;
       for(uint32_t i = 0; i < vecISize.size(); ++i) absDev.push_back(std::abs((int32_t) vecISize[i] - median));
       std::sort(absDev.begin(), absDev.end());
-      mad = absDev[absDev.size() / 2];
+      int32_t mad = absDev[absDev.size() / 2];
 
       // Get default library orientation
       if ((median >= 50) && (median<=100000)) {

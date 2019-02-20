@@ -241,7 +241,6 @@ namespace coralns
 	if (rec->core.qual < c.minQual) continue;
 
 	int32_t midPoint = rec->core.pos + halfAlignmentLength(rec);
-	int32_t isize = 0;
 	if (rec->core.flag & BAM_FPAIRED) {
 	  // Clean-up the read store for identical alignment positions
 	  if (rec->core.pos > lastAlignedPos) {
@@ -264,7 +263,7 @@ namespace coralns
 	  }
 	
 	  // Insert size filter
-	  isize = (rec->core.pos + alignmentLength(rec)) - rec->core.mpos;
+	  int32_t isize = (rec->core.pos + alignmentLength(rec)) - rec->core.mpos;
 	  if ((li.minNormalISize < isize) && (isize < li.maxNormalISize)) {
 	    midPoint = rec->core.mpos + (int32_t) (isize/2);
 	  } else {
