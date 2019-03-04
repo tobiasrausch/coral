@@ -468,9 +468,9 @@ namespace coralns
     boost::program_options::notify(vm);
 
     // Check command line arguments
-    if ((vm.count("help")) || (!vm.count("input-file"))) {
+    if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("genome")) || (!vm.count("mappability"))) {
       std::cout << std::endl;
-      std::cout << "Usage: coral " << argv[0] << " [OPTIONS] <aligned.bam>" << std::endl;
+      std::cout << "Usage: coral " << argv[0] << " [OPTIONS] -g hg19.fa -m hg19.map <aligned.bam>" << std::endl;
       std::cout << visible_options << "\n";
       return 1;
     }
@@ -543,6 +543,25 @@ namespace coralns
       c.nchr = hdr->n_targets;
       c.minChrLen = setMinChrLen(hdr, 0.95);
 
+      // Check matching chromosome names
+      faidx_t* faiRef = fai_load(c.genome.string().c_str());
+      faidx_t* faiMap = fai_load(c.mapFile.string().c_str());
+      uint32_t mapFound = 0;
+      for(int32_t refIndex=0; refIndex < hdr->n_targets; ++refIndex) {
+	std::string tname(hdr->target_name[refIndex]);
+	if (!faidx_has_seq(faiRef, tname.c_str())) {
+	  std::cerr << "BAM file chromosome " << hdr->target_name[refIndex] << " is NOT present in your reference file " << c.genome.string() << std::endl;
+	  return 1;
+	}
+	if (faidx_has_seq(faiMap, tname.c_str())) ++mapFound;
+      }
+      fai_destroy(faiRef);
+      fai_destroy(faiMap);
+      if (!mapFound) {
+	std::cerr << "Mappability map chromosome naming disagrees with BAM file!" << std::endl;
+	return 1;
+      }
+      
       // Estimate insert size
       getLibraryParams(c, li);
       c.meanisize = ((int32_t) (li.median / 2)) * 2 + 1;
