@@ -40,7 +40,6 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include "count.h"
 #include "segment.h"
 #include "merge.h"
-#include "baf.h"
 
 using namespace coralns;
 
@@ -52,7 +51,6 @@ displayUsage() {
   std::cout << "Commands:" << std::endl;
   std::cout << std::endl;
   std::cout << "    count        count reads" << std::endl;
-  std::cout << "    baf          B-allele frequency" << std::endl;
   std::cout << "    merge        merge counts" << std::endl;
   std::cout << "    segment      segment coverage" << std::endl;
   std::cout << std::endl;
@@ -85,9 +83,6 @@ int main(int argc, char **argv) {
   }
   else if ((std::string(argv[1]) == "count")) {
     return countReads(argc-1,argv+1);
-  }
-  else if ((std::string(argv[1]) == "baf")) {
-    return baf(argc-1,argv+1);
   }
   else if ((std::string(argv[1]) == "merge")) {
     return merge(argc-1,argv+1);

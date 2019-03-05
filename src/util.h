@@ -324,6 +324,13 @@ namespace coralns
     }
     return h;
   }
+
+  inline std::size_t hash_se(bam1_t* rec) {
+    std::size_t seed = hash_string(bam_get_qname(rec));
+    boost::hash_combine(seed, rec->core.tid);
+    boost::hash_combine(seed, rec->core.pos);
+    return seed;
+  }
   
   inline std::size_t hash_pair(bam1_t* rec) {
     std::size_t seed = hash_string(bam_get_qname(rec));

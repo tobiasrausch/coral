@@ -34,6 +34,7 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include <htslib/sam.h>
 #include <htslib/faidx.h>
 
+#include "baf.h"
 #include "cnv.h"
 #include "bed.h"
 #include "version.h"
@@ -49,7 +50,6 @@ namespace coralns
     bool hasBedFile;
     bool hasScanFile;
     bool noScanWindowSelection;
-    bool adaptiveWindowLength;
     uint32_t nchr;
     uint32_t meanisize;
     uint32_t window_size;
@@ -58,25 +58,28 @@ namespace coralns
     uint32_t minChrLen;
     uint32_t minCnvSize;
     uint16_t minQual;
+    uint16_t minBaseQual;
     uint16_t mad;
+    uint16_t minCoverage;
+    uint16_t minSnps;
     float exclgc;
     float uniqueToTotalCovRatio;
     float fracWindow;
     float fragmentUnique;
     std::string sampleName;
+    std::string outprefix;
     boost::filesystem::path genome;
     boost::filesystem::path statsFile;
     boost::filesystem::path mapFile;
     boost::filesystem::path bamFile;
     boost::filesystem::path bedFile;
+    boost::filesystem::path vcffile;
     boost::filesystem::path scanFile;
-    boost::filesystem::path outfile;
   };
 
-  template<typename TConfig>
+  template<typename TConfig, typename TGenomicVariants>
   inline int32_t
-  bamCount(TConfig const& c, LibraryInfo const& li, std::vector<GcBias> const& gcbias, std::pair<uint32_t, uint32_t> const& gcbound) {
-    
+  bamCount(TConfig const& c, LibraryInfo const& li, std::vector<GcBias> const& gcbias, std::pair<uint32_t, uint32_t> const& gcbound, TGenomicVariants& gvar) {
     // Load bam file
     samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
@@ -99,11 +102,17 @@ namespace coralns
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Count fragments" << std::endl;
     boost::progress_display show_progress( hdr->n_targets );
 
-    // Open output file
-    boost::iostreams::filtering_ostream dataOut;
-    dataOut.push(boost::iostreams::gzip_compressor());
-    dataOut.push(boost::iostreams::file_sink(c.outfile.string().c_str(), std::ios_base::out | std::ios_base::binary));
-    dataOut << "chr\tstart\tend\t" << c.sampleName << "_counts\t" << c.sampleName << "_CN" << std::endl;
+    // Open output files
+    std::string filename = c.outprefix + ".fixed.cov.gz";
+    boost::iostreams::filtering_ostream dataOutFixed;
+    dataOutFixed.push(boost::iostreams::gzip_compressor());
+    dataOutFixed.push(boost::iostreams::file_sink(filename.c_str(), std::ios_base::out | std::ios_base::binary));
+    dataOutFixed << "chr\tstart\tend\t" << c.sampleName << "_counts\t" << c.sampleName << "_CN\t" << c.sampleName << "_MAF" << std::endl;
+    filename = c.outprefix + ".adaptive.cov.gz";
+    boost::iostreams::filtering_ostream dataOutAdapt;
+    dataOutAdapt.push(boost::iostreams::gzip_compressor());
+    dataOutAdapt.push(boost::iostreams::file_sink(filename.c_str(), std::ios_base::out | std::ios_base::binary));
+    dataOutAdapt << "chr\tstart\tend\t" << c.sampleName << "_counts\t" << c.sampleName << "_CN\t" << c.sampleName << "_MAF" << std::endl;
     
     // Iterate chromosomes
     faidx_t* faiMap = fai_load(c.mapFile.string().c_str());
@@ -225,9 +234,10 @@ namespace coralns
       hts_itr_destroy(iter);
       mateMap.clear();
 
+      // BED File (target intervals)
       if (c.hasBedFile) {
-	// Use bed file
-	if (c.adaptiveWindowLength) {
+	// Adaptive Window Length
+	{
 	  double covsum = 0;
 	  double expcov = 0;
 	  double obsexp = 0;
@@ -260,7 +270,10 @@ namespace coralns
 		      obsexp /= (double) winlen;
 		      double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
 		      double cn = 2 * covsum / expcov;
-		      dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << count << "\t" << cn << std::endl;
+		      dataOutAdapt << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << count << "\t" << cn;
+		      double maf = mafSegment(start, pos + 1, c.minSnps, gvar[refIndex]);
+		      if (maf != -1) dataOutAdapt << "\t" << maf << std::endl;
+		      else dataOutAdapt << "\tNA" << std::endl;
 		      // reset
 		      covsum = 0;
 		      expcov = 0;
@@ -295,7 +308,9 @@ namespace coralns
 	      }
 	    }
 	  }
-	} else {
+	}
+	// Fixed Window Length
+	{
 	  for(typename TChrIntervals::iterator it = bedRegions[refIndex].begin(); it != bedRegions[refIndex].end(); ++it) {
 	    if ((it->first < it->second) && (it->second <= hdr->target_len[refIndex])) {
 	      double covsum = 0;
@@ -314,16 +329,19 @@ namespace coralns
 		obsexp /= (double) winlen;
 		double count = ((double) covsum / obsexp ) * (double) (it->second - it->first) / (double) winlen;
 		double cn = 2 * covsum / expcov;
-		dataOut << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\t" << count << "\t" << cn << std::endl;
+		dataOutFixed << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\t" << count << "\t" << cn;
+		double maf = mafSegment(it->first, it->second, c.minSnps, gvar[refIndex]);
+		if (maf != -1) dataOutFixed << "\t" << maf << std::endl;
+		else dataOutFixed << "\tNA" << std::endl;
 	      } else {
-		dataOut << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\tNA\tNA" << std::endl;
+		dataOutFixed << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\tNA\tNA\tNA" << std::endl;
 	      }
 	    }
 	  }
 	}
       } else {
-	// Use windows
-	if (c.adaptiveWindowLength) {
+	// Use adaptive windows (genomic tiling)
+	{
 	  double covsum = 0;
 	  double expcov = 0;
 	  double obsexp = 0;
@@ -340,7 +358,10 @@ namespace coralns
 		obsexp /= (double) winlen;
 		double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
 		double cn = 2 * covsum / expcov;
-		dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << count << "\t" << cn << std::endl;
+		dataOutAdapt << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << count << "\t" << cn;
+		double maf = mafSegment(start, pos + 1, c.minSnps, gvar[refIndex]);
+		if (maf != -1) dataOutAdapt << "\t" << maf << std::endl;
+		else dataOutAdapt << "\tNA" << std::endl;
 		// reset
 		covsum = 0;
 		expcov = 0;
@@ -367,7 +388,9 @@ namespace coralns
 	    }
 	    ++pos;
 	  }
-	} else {
+	}
+	{
+	  // Fixed windows (genomic tiling)
 	  for(uint32_t start = 0; start < hdr->target_len[refIndex]; start = start + c.window_offset) {
 	    if (start + c.window_size < hdr->target_len[refIndex]) {
 	      double covsum = 0;
@@ -386,7 +409,10 @@ namespace coralns
 		obsexp /= (double) winlen;
 		double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
 		double cn = 2 * covsum / expcov;
-		dataOut << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (start + c.window_size) << "\t" << count << "\t" << cn << std::endl;
+		dataOutFixed << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (start + c.window_size) << "\t" << count << "\t" << cn;
+		double maf = mafSegment(start, start + c.window_size, c.minSnps, gvar[refIndex]);
+		if (maf != -1) dataOutFixed << "\t" << maf << std::endl;
+		else dataOutFixed << "\tNA" << std::endl;
 	      }
 	    }
 	  }
@@ -400,8 +426,9 @@ namespace coralns
     bam_hdr_destroy(hdr);
     hts_idx_destroy(idx);
     sam_close(samfile);
-    dataOut.pop();
-
+    dataOutFixed.pop();
+    dataOutAdapt.pop();
+    
     // Done
     now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Done." << std::endl;
@@ -425,7 +452,7 @@ namespace coralns
       ("mappability,m", boost::program_options::value<boost::filesystem::path>(&c.mapFile), "input mappability map")
       ("minsize,z", boost::program_options::value<uint32_t>(&c.minCnvSize)->default_value(250), "min. CNV size")
       ("fragment,e", boost::program_options::value<float>(&c.fragmentUnique)->default_value(0.97), "min. fragment uniqueness [0,1]")
-      ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("cov.gz"), "coverage output file")
+      ("outprefix,o", boost::program_options::value<std::string>(&c.outprefix)->default_value("outprefix"), "output file prefix")
       ;
 
     boost::program_options::options_description window("Window options");
@@ -434,18 +461,25 @@ namespace coralns
       ("window-offset,j", boost::program_options::value<uint32_t>(&c.window_offset)->default_value(10000), "window offset")
       ("bed-intervals,b", boost::program_options::value<boost::filesystem::path>(&c.bedFile), "input BED file")
       ("fraction-window,k", boost::program_options::value<float>(&c.fracWindow)->default_value(0.5), "min. callable window fraction [0,1]")
-      ("adaptive-window-size,a", "use adaptive window size depending on mappability")
       ;
 
     boost::program_options::options_description gcopt("GC options");
     gcopt.add_options()
-      ("scan-window,c", boost::program_options::value<uint32_t>(&c.scanWindow)->default_value(10000), "scanning window size")
+      ("scan-window,w", boost::program_options::value<uint32_t>(&c.scanWindow)->default_value(10000), "scanning window size")
       ("fraction-unique,f", boost::program_options::value<float>(&c.uniqueToTotalCovRatio)->default_value(0.8), "uniqueness filter for scan windows [0,1]")
       ("scan-regions,r", boost::program_options::value<boost::filesystem::path>(&c.scanFile), "scanning regions in BED format")
       ("mad-cutoff,d", boost::program_options::value<uint16_t>(&c.mad)->default_value(3), "median + 3 * mad count cutoff")
       ("percentile,p", boost::program_options::value<float>(&c.exclgc)->default_value(0.0005), "excl. extreme GC fraction")
       ("no-window-selection,n", "no scan window selection")
-      ;      
+      ;
+    
+    boost::program_options::options_description vcopt("Variant options");
+    vcopt.add_options()
+      ("basequality,a", boost::program_options::value<uint16_t>(&c.minBaseQual)->default_value(10), "min. base quality")
+      ("coverage,c", boost::program_options::value<uint16_t>(&c.minCoverage)->default_value(10), "min. SNP coverage")
+      ("snps,l", boost::program_options::value<uint16_t>(&c.minSnps)->default_value(3), "min. #SNPs per segment")
+      ("vcffile,v", boost::program_options::value<boost::filesystem::path>(&c.vcffile), "input VCF file")
+      ;
 
     boost::program_options::options_description hidden("Hidden options");
     hidden.add_options()
@@ -458,9 +492,9 @@ namespace coralns
 
     // Set the visibility
     boost::program_options::options_description cmdline_options;
-    cmdline_options.add(generic).add(window).add(gcopt).add(hidden);
+    cmdline_options.add(generic).add(window).add(gcopt).add(vcopt).add(hidden);
     boost::program_options::options_description visible_options;
-    visible_options.add(generic).add(window).add(gcopt);
+    visible_options.add(generic).add(window).add(gcopt).add(vcopt);
 
     // Parse command-line
     boost::program_options::variables_map vm;
@@ -498,10 +532,6 @@ namespace coralns
     // Scan window selection
     if (vm.count("no-window-selection")) c.noScanWindowSelection = true;
     else c.noScanWindowSelection = false;
-
-    // Adaptive window length
-    if (vm.count("adaptive-window-size")) c.adaptiveWindowLength = true;
-    else c.adaptiveWindowLength = false;
 
     // Check window size
     if (c.window_offset > c.window_size) c.window_offset = c.window_size;
@@ -575,6 +605,12 @@ namespace coralns
       sam_close(samfile);
     }
 
+    // B-allele frequency
+    typedef std::vector<BiallelicSupport> TVariantSupport;
+    typedef std::vector<TVariantSupport> TGenomicVariants;
+    TGenomicVariants gvar(c.nchr, TVariantSupport());
+    if (vm.count("vcffile")) baf(c, li, gvar);
+
     // Scan genomic windows
     typedef std::vector<ScanWindow> TWindowCounts;
     typedef std::vector<TWindowCounts> TGenomicWindowCounts;
@@ -617,7 +653,7 @@ namespace coralns
     }
     
     // Count reads
-    return bamCount(c, li, gcbias, gcbound);
+    return bamCount(c, li, gcbias, gcbound, gvar);
   }
 
   

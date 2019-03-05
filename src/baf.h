@@ -39,6 +39,7 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include <boost/iostreams/filtering_stream.hpp>
 #include <boost/iostreams/filter/zlib.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
+#include <boost/math/distributions/binomial.hpp>
 #include <boost/random.hpp>
 #include <boost/generator_iterator.hpp>
 #include <boost/tuple/tuple.hpp>
@@ -54,373 +55,271 @@ Contact: Tobias Rausch (rausch@embl.de)
 namespace coralns {
 
 
-  struct BafConfig {
-    bool tumorOnly;
-    uint16_t minMapQual;
-    uint16_t minBaseQual;
-    boost::filesystem::path genome;
-    boost::filesystem::path mapFile;
-    boost::filesystem::path outfile;
-    boost::filesystem::path vcffile;
-    std::vector<boost::filesystem::path> files;
-  };
-
-  template<typename TConfig>
+  inline double
+  binomTest(uint32_t x, uint32_t n, double p) {
+    boost::math::binomial binomialdist(n, p);
+    double cutoff = pdf(binomialdist, x);
+    double pval = 0.0;
+    for(uint32_t k = 0; k <= n; ++k) {
+      double p = pdf(binomialdist, k);
+      if (p <= cutoff) pval +=p;
+    }
+    return pval;
+  }
+  
+  template<typename TConfig, typename TGenomicVariants>
   inline int32_t
-  bafRun(TConfig& c) {
-  /*
-
-    // Load bam files
-    samFile* samfile = sam_open(c.bamfile.string().c_str(), "r");
+  baf(TConfig const& c, LibraryInfo const& li, TGenomicVariants& gvar) {
+    // Open BAM file
+    samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
-    hts_idx_t* idx = sam_index_load(samfile, c.bamfile.string().c_str());
+    hts_idx_t* idx = sam_index_load(samfile, c.bamFile.string().c_str());
     bam_hdr_t* hdr = sam_hdr_read(samfile);
 
     // Load bcf file
     htsFile* ibcffile = bcf_open(c.vcffile.string().c_str(), "r");
     hts_idx_t* bcfidx = bcf_index_load(c.vcffile.string().c_str());
     bcf_hdr_t* bcfhdr = bcf_hdr_read(ibcffile);
-    
-    boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Assign reads to haplotypes" << std::endl;
-    boost::progress_display show_progress(hdr->n_targets);
 
-    // Allele support file
-    boost::iostreams::filtering_ostream dataOut;
-    dataOut.push(boost::iostreams::gzip_compressor());
-    dataOut.push(boost::iostreams::file_sink(c.as.string().c_str(), std::ios_base::out | std::ios_base::binary));
-    dataOut << "chr\tpos\tid\tref\talt\tdepth\trefsupport\taltsupport\tgt\taf\tpvalue" << std::endl;
-  
-    // Assign reads to SNPs
-    faidx_t* fai = fai_load(c.genome.string().c_str());
-    for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
-      std::string chrName(hdr->target_name[refIndex]);
+    // Parse BAM
+    boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Variant Calling" << std::endl;
+    boost::progress_display show_progress( hdr->n_targets );
+    
+    // Iterate all chromosomes
+    faidx_t* faiMap = fai_load(c.mapFile.string().c_str());
+    faidx_t* faiRef = fai_load(c.genome.string().c_str());
+    for (int32_t refIndex = 0; refIndex < hdr->n_targets; ++refIndex) {
       ++show_progress;
+      if (chrNoData(c, refIndex, idx)) continue;
 
       // Load het. markers
-      typedef std::vector<BiallelicVariant> TPhasedVariants;
-      TPhasedVariants pv;
-      if (!_loadVariants(ibcffile, bcfidx, bcfhdr, c.sample, chrName, pv)) continue;
+      typedef std::vector<BiallelicVariant> TVariants;
+      TVariants pv;
+      if (!_loadVariants(ibcffile, bcfidx, bcfhdr, c.sampleName, hdr->target_name[refIndex], pv)) continue;
       if (pv.empty()) continue;
 
       // Sort variants
       std::sort(pv.begin(), pv.end(), SortVariants<BiallelicVariant>());
+         
+      // Check presence in mappability map
+      std::string tname(hdr->target_name[refIndex]);
+      int32_t seqlen = faidx_seq_len(faiMap, tname.c_str());
+      if (seqlen == - 1) continue;
+      else seqlen = -1;
+      char* seq = faidx_fetch_seq(faiMap, tname.c_str(), 0, faidx_seq_len(faiMap, tname.c_str()), &seqlen);
 
-      // Load reference
-      int32_t seqlen = -1;
-      char* seq = NULL;
-      seq = faidx_fetch_seq(fai, chrName.c_str(), 0, hdr->target_len[refIndex], &seqlen);
-      
-      // Annotate REF and ALT support
-      typedef std::vector<uint32_t> TAlleleSupport;
-      TAlleleSupport ref(pv.size(), 0);
-      TAlleleSupport alt(pv.size(), 0);
-      hts_itr_t* itr = sam_itr_queryi(idx, refIndex, 0, hdr->target_len[refIndex]);
-      bam1_t* r = bam_init1();
-      while (sam_itr_next(samfile, itr, r) >= 0) {
-	if (r->core.flag & (BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FSUPPLEMENTARY | BAM_FUNMAP)) continue;
-	if ((r->core.qual < c.minMapQual) || (r->core.tid<0)) continue;
-	if ((r->core.flag & BAM_FPAIRED) && (r->core.flag & BAM_FMUNMAP)) continue;
+      // Pre-screen valid reads
+      typedef boost::unordered_map<std::size_t, bool> TValidReads;
+      TValidReads validRead;
+      {
+	// Get Mappability
+	std::vector<uint16_t> uniqContent(hdr->target_len[refIndex], 0);
+	{
+	  // Mappability map
+	  typedef boost::dynamic_bitset<> TBitSet;
+	  TBitSet uniq(hdr->target_len[refIndex], false);
+	  for(uint32_t i = 0; i < hdr->target_len[refIndex]; ++i) {
+	    if (seq[i] == 'C') uniq[i] = 1;
+	  }
 
-	// Fetch contained variants
-	TPhasedVariants::const_iterator vIt = std::lower_bound(pv.begin(), pv.end(), BiallelicVariant(r->core.pos), SortVariants<BiallelicVariant>());
-	TPhasedVariants::const_iterator vItEnd = std::upper_bound(pv.begin(), pv.end(), BiallelicVariant(lastAlignedPosition(r)), SortVariants<BiallelicVariant>());
-	if (vIt != vItEnd) {
-	  // Get read sequence
-	  std::string sequence;
-	  sequence.resize(r->core.l_qseq);
-	  uint8_t* seqptr = bam_get_seq(r);
-	  for (int32_t i = 0; i < r->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
+	  // Sum across fragment
+	  int32_t halfwin = (int32_t) (c.meanisize / 2);
+	  int32_t usum = 0;
+	  for(int32_t pos = halfwin; pos < (int32_t) hdr->target_len[refIndex] - halfwin; ++pos) {
+	    if (pos == halfwin) {
+	      for(int32_t i = pos - halfwin; i<=pos+halfwin; ++i) usum += uniq[i];
+	    } else {
+	      usum -= uniq[pos - halfwin - 1];
+	      usum += uniq[pos + halfwin];
+	    }
+	    uniqContent[pos] = usum;
+	  }
+	}
 
-	  // Get base qualities
-	  typedef std::vector<uint8_t> TQuality;
-	  TQuality quality;
-	  quality.resize(r->core.l_qseq);
-	  uint8_t* qualptr = bam_get_qual(r);
-	  for (int i = 0; i < r->core.l_qseq; ++i) quality[i] = qualptr[i];
+	// Mate map
+	typedef boost::unordered_map<std::size_t, bool> TMateMap;
+	TMateMap mateMap;
+	
+	// Count reads
+	hts_itr_t* iter = sam_itr_queryi(idx, refIndex, 0, hdr->target_len[refIndex]);
+	bam1_t* rec = bam_init1();
+	int32_t lastAlignedPos = 0;
+	std::set<std::size_t> lastAlignedPosReads;
+	while (sam_itr_next(samfile, iter, rec) >= 0) {
+	  if (rec->core.flag & (BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FSUPPLEMENTARY | BAM_FUNMAP)) continue;
+	  if ((rec->core.flag & BAM_FPAIRED) && ((rec->core.flag & BAM_FMUNMAP) || (rec->core.tid != rec->core.mtid))) continue;
+	  if (rec->core.qual < c.minQual) continue;
 	  
-	  // Parse CIGAR
-	  uint32_t* cigar = bam_get_cigar(r);
-	  for(;vIt != vItEnd; ++vIt) {
-	    int32_t gp = r->core.pos; // Genomic position
-	    int32_t sp = 0; // Sequence position
-	    bool varFound = false;
-	    for (std::size_t i = 0; ((i < r->core.n_cigar) && (!varFound)); ++i) {
-	      if (bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) sp += bam_cigar_oplen(cigar[i]);
-	      else if (bam_cigar_op(cigar[i]) == BAM_CINS) sp += bam_cigar_oplen(cigar[i]);
-	      else if (bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) sp += bam_cigar_oplen(cigar[i]);
-	      else if (bam_cigar_op(cigar[i]) == BAM_CDEL) gp += bam_cigar_oplen(cigar[i]);
-	      else if (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP) gp += bam_cigar_oplen(cigar[i]);
-	      else if (bam_cigar_op(cigar[i]) == BAM_CHARD_CLIP) {
-		//Nop
-	      } else if ((bam_cigar_op(cigar[i]) == BAM_CMATCH) || (bam_cigar_op(cigar[i]) == BAM_CEQUAL) || (bam_cigar_op(cigar[i]) == BAM_CDIFF)) {
-		if (gp + (int32_t) bam_cigar_oplen(cigar[i]) < vIt->pos) {
-		  gp += bam_cigar_oplen(cigar[i]);
-		  sp += bam_cigar_oplen(cigar[i]);
-		} else {
-		  for(std::size_t k = 0; k<bam_cigar_oplen(cigar[i]); ++k, ++sp, ++gp) {
-		    if (gp == vIt->pos) {
-		      varFound = true;
-		      if (quality[sp] >= c.minBaseQual) {
-			// Check REF allele
-			if (vIt->ref == std::string(seq + gp, seq + gp + vIt->ref.size())) {
-			  // Check ALT allele
-			  if ((sp + vIt->alt.size() < sequence.size()) && (sp + vIt->ref.size() < sequence.size())) {
-			    if (vIt->ref.size() == vIt->alt.size()) {
-			      // SNP
-			      if ((sequence.substr(sp, vIt->alt.size()) == vIt->alt) && (sequence.substr(sp, vIt->ref.size()) != vIt->ref)) {
-				++alt[vIt-pv.begin()];
-			      } else if ((sequence.substr(sp, vIt->alt.size()) != vIt->alt) && (sequence.substr(sp, vIt->ref.size()) == vIt->ref)) {
-				++ref[vIt-pv.begin()];
-			      }
-			    }
-			  } else if (vIt->ref.size() < vIt->alt.size()) {
-			    // Insertion
-			    int32_t diff = vIt->alt.size() - vIt->ref.size();
-			    std::string refProbe = vIt->ref + std::string(seq + gp + vIt->ref.size(), seq + gp + vIt->ref.size() + diff);
-			    if ((sequence.substr(sp, vIt->alt.size()) == vIt->alt) && (sequence.substr(sp, vIt->alt.size()) != refProbe)) {
-			      ++alt[vIt-pv.begin()];
-			    } else if ((sequence.substr(sp, vIt->alt.size()) != vIt->alt) && (sequence.substr(sp, vIt->alt.size()) == refProbe)) {
-			      ++ref[vIt-pv.begin()];
-			    }
-			  } else {
-			    // Deletion
-			    int32_t diff = vIt->ref.size() - vIt->alt.size();
-			    std::string altProbe = vIt->alt + std::string(seq + gp + vIt->ref.size(), seq + gp + vIt->ref.size() + diff);
-			    if ((sequence.substr(sp, vIt->ref.size()) == altProbe) && (sequence.substr(sp, vIt->ref.size()) != vIt->ref)) {
-			      ++alt[vIt-pv.begin()];
-			    } else if ((sequence.substr(sp, vIt->ref.size()) != altProbe) && (sequence.substr(sp, vIt->ref.size()) == vIt->ref)) {
-			      ++ref[vIt-pv.begin()];
+	  int32_t midPoint = rec->core.pos + halfAlignmentLength(rec);
+	  std::size_t hv = hash_se(rec);
+	  if (rec->core.flag & BAM_FPAIRED) {
+	    // Clean-up the read store for identical alignment positions
+	    if (rec->core.pos > lastAlignedPos) {
+	      lastAlignedPosReads.clear();
+	      lastAlignedPos = rec->core.pos;
+	    }
+	    
+	    if ((rec->core.pos < rec->core.mpos) || ((rec->core.pos == rec->core.mpos) && (lastAlignedPosReads.find(hash_string(bam_get_qname(rec))) == lastAlignedPosReads.end()))) {
+	      // First read
+	      lastAlignedPosReads.insert(hash_string(bam_get_qname(rec)));
+	      hv = hash_pair(rec);
+	      mateMap[hv] = true;
+	      continue;
+	    } else {
+	      // Second read
+	      hv = hash_pair_mate(rec);
+	      if ((mateMap.find(hv) == mateMap.end()) || (!mateMap[hv])) continue; // Mate discarded
+	      mateMap[hv] = false;
+	    }
+
+	    // Insert size filter
+	    int32_t isize = (rec->core.pos + alignmentLength(rec)) - rec->core.mpos;
+	    if ((li.minNormalISize < isize) && (isize < li.maxNormalISize)) midPoint = rec->core.mpos + (int32_t) (isize/2);
+	    else continue;
+	  }
+
+	  // Select read
+	  if ((midPoint >= 0) && (midPoint < (int32_t) hdr->target_len[refIndex]) && (c.meanisize == uniqContent[midPoint])) validRead[hv] = true;
+	}
+	bam_destroy1(rec);
+	hts_itr_destroy(iter);
+      }
+      
+      // Mappability map not needed anymore
+      if (seq != NULL) free(seq);
+
+      // Check presence in reference
+      seqlen = faidx_seq_len(faiRef, tname.c_str());
+      if (seqlen == - 1) continue;
+      else seqlen = -1;
+      char* ref = faidx_fetch_seq(faiRef, tname.c_str(), 0, faidx_seq_len(faiRef, tname.c_str()), &seqlen);
+
+      // Count REF and ALT support
+
+      typedef std::vector<uint16_t> TAlleleSupport;
+      int32_t maxCoverage = std::numeric_limits<uint16_t>::max();
+      TAlleleSupport refS(pv.size(), 0);
+      TAlleleSupport altS(pv.size(), 0);
+      {
+	hts_itr_t* iter = sam_itr_queryi(idx, refIndex, 0, hdr->target_len[refIndex]);
+	bam1_t* rec = bam_init1();
+	int32_t lastAlignedPos = 0;
+	std::set<std::size_t> lastAlignedPosReads;
+	while (sam_itr_next(samfile, iter, rec) >= 0) {
+	  if (rec->core.flag & (BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FSUPPLEMENTARY | BAM_FUNMAP)) continue;
+	  if ((rec->core.flag & BAM_FPAIRED) && ((rec->core.flag & BAM_FMUNMAP) || (rec->core.tid != rec->core.mtid))) continue;
+	  if (rec->core.qual < c.minQual) continue;
+	  
+	  std::size_t hv = hash_se(rec);
+	  if (rec->core.flag & BAM_FPAIRED) {
+	    // Clean-up the read store for identical alignment positions
+	    if (rec->core.pos > lastAlignedPos) {
+	      lastAlignedPosReads.clear();
+	      lastAlignedPos = rec->core.pos;
+	    }
+	    
+	    if ((rec->core.pos < rec->core.mpos) || ((rec->core.pos == rec->core.mpos) && (lastAlignedPosReads.find(hash_string(bam_get_qname(rec))) == lastAlignedPosReads.end()))) {
+	      // First read
+	      lastAlignedPosReads.insert(hash_string(bam_get_qname(rec)));
+	      hv = hash_pair(rec);
+	    } else {
+	      // Second read
+	      hv = hash_pair_mate(rec);
+	    }
+	  }
+
+	  // Valid read?
+	  if (validRead.find(hv) != validRead.end()) {
+	    // Fetch contained variants
+	    typename TVariants::const_iterator vIt = std::lower_bound(pv.begin(), pv.end(), BiallelicVariant(rec->core.pos), SortVariants<BiallelicVariant>());
+	    typename TVariants::const_iterator vItEnd = std::upper_bound(pv.begin(), pv.end(), BiallelicVariant(lastAlignedPosition(rec)), SortVariants<BiallelicVariant>());
+	    if (vIt != vItEnd) {
+	      // Get read sequence
+	      std::string sequence;
+	      sequence.resize(rec->core.l_qseq);
+	      uint8_t* seqptr = bam_get_seq(rec);
+	      for (int32_t i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
+
+	      // Get base qualities
+	      typedef std::vector<uint8_t> TQuality;
+	      TQuality quality;
+	      quality.resize(rec->core.l_qseq);
+	      uint8_t* qualptr = bam_get_qual(rec);
+	      for (int i = 0; i < rec->core.l_qseq; ++i) quality[i] = qualptr[i];
+	  
+	      // Parse CIGAR
+	      uint32_t* cigar = bam_get_cigar(rec);
+	      for(;vIt != vItEnd; ++vIt) {
+		uint32_t gp = rec->core.pos; // Genomic position
+		uint32_t sp = 0; // Sequence position
+		for (std::size_t i = 0; i < rec->core.n_cigar; ++i) {
+		  if (bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) sp += bam_cigar_oplen(cigar[i]);
+		  else if (bam_cigar_op(cigar[i]) == BAM_CINS) sp += bam_cigar_oplen(cigar[i]);
+		  else if (bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) sp += bam_cigar_oplen(cigar[i]);
+		  else if (bam_cigar_op(cigar[i]) == BAM_CDEL) gp += bam_cigar_oplen(cigar[i]);
+		  else if (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP) gp += bam_cigar_oplen(cigar[i]);
+		  else if (bam_cigar_op(cigar[i]) == BAM_CHARD_CLIP) {
+		    //Nop
+		  } else if ((bam_cigar_op(cigar[i]) == BAM_CMATCH) || (bam_cigar_op(cigar[i]) == BAM_CEQUAL) || (bam_cigar_op(cigar[i]) == BAM_CDIFF)) {
+		    if (gp + (int32_t) bam_cigar_oplen(cigar[i]) < vIt->pos) {
+		      gp += bam_cigar_oplen(cigar[i]);
+		      sp += bam_cigar_oplen(cigar[i]);
+		    } else {
+		      for(std::size_t k = 0; k<bam_cigar_oplen(cigar[i]); ++k, ++sp, ++gp) {
+			if (gp == vIt->pos) {
+			  if (quality[sp] >= c.minBaseQual) {
+			    // Check REF and ALT alleles
+			    std::string rnuc = boost::to_upper_copy(std::string(1, ref[gp]));
+			    if ((gp < hdr->target_len[refIndex]) && (vIt->ref == rnuc[0]) && (sp < sequence.size())) {
+			      if ((sequence[sp] == vIt->alt) && (altS[vIt-pv.begin()] < maxCoverage)) ++altS[vIt-pv.begin()];
+			      else if ((sequence[sp] == vIt->ref) && (refS[vIt-pv.begin()] < maxCoverage)) ++refS[vIt-pv.begin()];
 			    }
 			  }
 			}
 		      }
 		    }
 		  }
+		  else std::cerr << "Warning: Unknown Cigar options!" << std::endl;
 		}
 	      }
-	      else {
-		std::cerr << "Unknown Cigar options" << std::endl;
-		return 1;
-	      }
 	    }
 	  }
 	}
+	bam_destroy1(rec);
+	hts_itr_destroy(iter);
       }
-      bam_destroy1(r);
-      hts_itr_destroy(itr);
-      if (seqlen) free(seq);
+      // Clean-up      
+      if (ref != NULL) free(ref);
 
-      // Output (phased) allele support
-      hts_itr_t* itervcf = bcf_itr_querys(bcfidx, bcfhdr, chrName.c_str());
-      if (itervcf != NULL) {
-	bcf1_t* recvcf = bcf_init1();
-	for (uint32_t i = 0; i<pv.size(); ++i) {
-	  // Fetch variant annotation from VCF
-	  int32_t itrRet = 0;
-	  do {
-	    itrRet = bcf_itr_next(ibcffile, itervcf, recvcf);
-	    if (itrRet >= 0) {
-	      bcf_unpack(recvcf, BCF_UN_SHR);
-	      std::vector<std::string> alleles;
-	      for(std::size_t k = 0; k<recvcf->n_allele; ++k) alleles.push_back(std::string(recvcf->d.allele[k]));
-	      if ((recvcf->pos == pv[i].pos) && (pv[i].ref == alleles[0]) && (pv[i].alt == alleles[1])) break;
-	    } else {
-	      std::cerr << "Error: Variant not found! " << chrName << ":" << (pv[i].pos + 1) << std::endl;
-	      return 1;
-	    }
-	  } while (itrRet >= 0);
-	  uint32_t totalcov = ref[i] + alt[i];
-	  std::string hapstr = "0/1";
-	  if (c.isPhased) {
-	    if (pv[i].hap) hapstr = "1|0";
-	    else hapstr = "0|1";
-	  }
-	  if (totalcov > 0) {
-	    double h1af = 0;
-	    double vaf = (double) alt[i] / (double) totalcov;
-	    if (pv[i].hap) h1af = (double) alt[i] / (double) totalcov;
-	    else h1af = (double) ref[i] / (double) totalcov;
-	    double pval = binomTest(alt[i], totalcov, 0.5);
-	    dataOut << chrName << "\t" << (pv[i].pos + 1) << "\t" << recvcf->d.id << "\t" << pv[i].ref << "\t" << pv[i].alt << "\t" << totalcov << "\t" << ref[i] << "\t" << alt[i] << "\t" << hapstr << "\t";
-	    if (c.isPhased) dataOut << h1af << "\t";
-	    else dataOut << vaf << "\t";
-	    dataOut << pval << std::endl;
-	  } else {
-	    if (c.outputAll) {
-	      // No coverage
-	      dataOut << chrName << "\t" << (pv[i].pos + 1) << "\t" << recvcf->d.id << "\t" << pv[i].ref << "\t" << pv[i].alt << "\t" << totalcov << "\t" << ref[i] << "\t" << alt[i] << "\t" << hapstr << "\tNA\tNA" << std::endl;
-	    }
-	  }
+      // Output allele support
+      for (uint32_t i = 0; i<pv.size(); ++i) {
+	uint32_t totalcov = refS[i] + altS[i];
+	if (totalcov > c.minCoverage) {
+	  // Make sure both alleles are supported to select likely heterozygous germline variants, at least 10% of total depth
+	  uint32_t minSupport = std::max((int32_t) std::ceil(0.1 * (double) totalcov), 2);
+	  if ((altS[i] >= minSupport) && (refS[i] >= minSupport)) gvar[refIndex].push_back(BiallelicSupport(pv[i].pos, refS[i], altS[i]));
 	}
-	bcf_destroy(recvcf);
-	hts_itr_destroy(itervcf);
       }
+
+      // Sort by position
+      std::sort(gvar[refIndex].begin(), gvar[refIndex].end(), SortVariants<BiallelicSupport>());
     }
-    fai_destroy(fai);
-
-    // Close bam
-    bam_hdr_destroy(hdr);
-    hts_idx_destroy(idx);
-    sam_close(samfile);
-
-    // Close output allele file
-    dataOut.pop();
 
     // Close BCF
     bcf_hdr_destroy(bcfhdr);
     hts_idx_destroy(bcfidx);
     bcf_close(ibcffile);
     
-    // End
-    now = boost::posix_time::second_clock::local_time();
-    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Done." << std::endl;
-  */
+    // Clean-up
+    fai_destroy(faiRef);
+    fai_destroy(faiMap);
+    bam_hdr_destroy(hdr);
+    hts_idx_destroy(idx);
+    sam_close(samfile);
+    
     return 0;
-
   }
-
-  int baf(int argc, char **argv) {
-    BafConfig c;
-
-    // Parameter
-    boost::program_options::options_description generic("Generic options");
-    generic.add_options()
-      ("help,?", "show help message")
-      ("map-qual,m", boost::program_options::value<uint16_t>(&c.minMapQual)->default_value(10), "min. mapping quality")
-      ("base-qual,b", boost::program_options::value<uint16_t>(&c.minBaseQual)->default_value(10), "min. base quality")
-      ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "input genome file")
-      ("mappability,m", boost::program_options::value<boost::filesystem::path>(&c.mapFile), "input mappability map")
-      ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("baf.gz"), "BAF output file")
-      ("vcffile,v", boost::program_options::value<boost::filesystem::path>(&c.vcffile), "input BCF file")
-      ;
-    
-    boost::program_options::options_description hidden("Hidden options");
-    hidden.add_options()
-      ("input-file", boost::program_options::value<std::vector<boost::filesystem::path> >(&c.files), "input bam files")
-      ;
-    
-    boost::program_options::positional_options_description pos_args;
-    pos_args.add("input-file", -1);
-    
-    boost::program_options::options_description cmdline_options;
-    cmdline_options.add(generic).add(hidden);
-    boost::program_options::options_description visible_options;
-    visible_options.add(generic);
-    boost::program_options::variables_map vm;
-    boost::program_options::store(boost::program_options::command_line_parser(argc, argv).options(cmdline_options).positional(pos_args).run(), vm);
-    boost::program_options::notify(vm);
-    
-    // Check command line arguments
-    if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("genome")) || (!vm.count("mappability")) || (!vm.count("vcffile"))) {
-      std::cout << "Usage: coral " << argv[0] << " [OPTIONS] -g <genome.fa> -v <snps.bcf> -m <map.fa> <tumor.bam> <control.bam>" << std::endl;
-      std::cout << visible_options << "\n";
-      return 1;
-    }
-
-    // Check reference
-    if (!(boost::filesystem::exists(c.genome) && boost::filesystem::is_regular_file(c.genome) && boost::filesystem::file_size(c.genome))) {
-      std::cerr << "Reference file is missing: " << c.genome.string() << std::endl;
-      return 1;
-    } else {
-      faidx_t* fai = fai_load(c.genome.string().c_str());
-      if (fai == NULL) {
-	if (fai_build(c.genome.string().c_str()) == -1) {
-	  std::cerr << "Fail to open genome fai index for " << c.genome.string() << std::endl;
-	  return 1;
-	} else fai = fai_load(c.genome.string().c_str());
-      }
-      fai_destroy(fai);
-    }
-
-    // Check mappability
-    if (!(boost::filesystem::exists(c.mapFile) && boost::filesystem::is_regular_file(c.mapFile) && boost::filesystem::file_size(c.mapFile))) {
-      std::cerr << "Mappability file is missing: " << c.mapFile.string() << std::endl;
-      return 1;
-    } else {
-      faidx_t* fai = fai_load(c.mapFile.string().c_str());
-      if (fai == NULL) {
-	if (fai_build(c.mapFile.string().c_str()) == -1) {
-	  std::cerr << "Fail to open mappability fai index for " << c.mapFile.string() << std::endl;
-	  return 1;
-	} else fai = fai_load(c.mapFile.string().c_str());
-      }
-      fai_destroy(fai);
-    }
-    
-    // Check input BAM files
-    for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
-      if (!(boost::filesystem::exists(c.files[file_c]) && boost::filesystem::is_regular_file(c.files[file_c]) && boost::filesystem::file_size(c.files[file_c]))) {
-	std::cerr << "Alignment file is missing: " << c.files[file_c].string() << std::endl;
-	return 1;
-      }
-      samFile* samfile = sam_open(c.files[file_c].string().c_str(), "r");
-      if (samfile == NULL) {
-	std::cerr << "Fail to open file " << c.files[file_c].string() << std::endl;
-	return 1;
-      }
-      hts_idx_t* idx = sam_index_load(samfile, c.files[file_c].string().c_str());
-      if (idx == NULL) {
-	std::cerr << "Fail to open index for " << c.files[file_c].string() << std::endl;
-	return 1;
-      }
-      bam_hdr_t* hdr = sam_hdr_read(samfile);
-      if (hdr == NULL) {
-	std::cerr << "Fail to open header for " << c.files[file_c].string() << std::endl;
-	return 1;
-      }
-      // Do chromosomes match?
-      faidx_t* fai = fai_load(c.genome.string().c_str());
-      for(int32_t refIndex=0; refIndex < hdr->n_targets; ++refIndex) {
-	std::string tname(hdr->target_name[refIndex]);
-	if (!faidx_has_seq(fai, tname.c_str())) {
-	  std::cerr << "BAM file chromosome " << hdr->target_name[refIndex] << " is NOT present in your reference file " << c.genome.string() << std::endl;
-	  return 1;
-	}
-      }
-      fai_destroy(fai);
-
-      // Clean-up
-      bam_hdr_destroy(hdr);
-      hts_idx_destroy(idx);
-      sam_close(samfile);
-    }
-      
-    // Check VCF/BCF file
-    if (vm.count("vcffile")) {
-      if (!(boost::filesystem::exists(c.vcffile) && boost::filesystem::is_regular_file(c.vcffile) && boost::filesystem::file_size(c.vcffile))) {
-	std::cerr << "Input SNP VCF/BCF file is missing: " << c.vcffile.string() << std::endl;
-	return 1;
-      }
-      htsFile* ifile = bcf_open(c.vcffile.string().c_str(), "r");
-      if (ifile == NULL) {
-	std::cerr << "Fail to open file " << c.vcffile.string() << std::endl;
-	return 1;
-      }
-      hts_idx_t* bcfidx = bcf_index_load(c.vcffile.string().c_str());
-      if (bcfidx == NULL) {
-	std::cerr << "Fail to open index file for " << c.vcffile.string() << std::endl;
-	return 1;
-      }
-      bcf_hdr_t* hdr = bcf_hdr_read(ifile);
-      if (hdr == NULL) {
-	std::cerr << "Fail to open header for " << c.vcffile.string() << std::endl;
-	return 1;
-      }
-      bcf_hdr_destroy(hdr);
-      hts_idx_destroy(bcfidx);
-      bcf_close(ifile);
-    }
-    
-    // Show cmd
-    boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] ";
-    for(int i=0; i<argc; ++i) { std::cout << argv[i] << ' '; }
-    std::cout << std::endl;
-    
-    return bafRun(c);
-  }
-
 
 }
 
