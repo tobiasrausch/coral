@@ -8,9 +8,8 @@ args = commandArgs(trailingOnly=TRUE)
 x = read.table(args[1], header=T)
 x = x[x$chr %in% chrs,]
 x$chr = factor(x$chr, levels=chrs)
-x$mid = (x$end + x$start) / 2
 
-p1 = ggplot(data=x, aes(x=mid, y=x[,5]))
+p1 = ggplot(data=x, aes(x=start, y=x[,5]))
 p1 = p1 + geom_point(pch=21, size=0.5)
 p1 = p1 + xlab("Chromosome")
 p1 = p1 + ylab("Copy-number")
@@ -24,8 +23,9 @@ print(warnings())
 for(chrname in unique(x$chr)) {
  print(chrname)
  sub = x[x$chr == chrname,]
- p = ggplot(data=sub, aes(x=mid, y=sub[,5]))
+ p = ggplot(data=sub, aes(x=start, y=sub[,5]))
  p = p + geom_point(pch=21, size=0.5)
+ p = p + geom_point(aes(x=start, y=sub[,6]), pch=21, size=0.5, color="red")
  p = p + ylab("Copy-number") + xlab(chrname)
  p = p + scale_x_continuous(labels=comma)
  p = p + ylim(0,8)

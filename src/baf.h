@@ -69,7 +69,7 @@ namespace coralns {
   
   template<typename TConfig, typename TGenomicVariants>
   inline int32_t
-  baf(TConfig const& c, LibraryInfo const& li, TGenomicVariants& gvar) {
+  baf(TConfig const& c, LibraryInfo const& li, TGenomicVariants const& cvar, TGenomicVariants& gvar) {
     // Open BAM file
     samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
@@ -196,7 +196,6 @@ namespace coralns {
       char* ref = faidx_fetch_seq(faiRef, tname.c_str(), 0, faidx_seq_len(faiRef, tname.c_str()), &seqlen);
 
       // Count REF and ALT support
-
       typedef std::vector<uint16_t> TAlleleSupport;
       int32_t maxCoverage = std::numeric_limits<uint16_t>::max();
       TAlleleSupport refS(pv.size(), 0);
@@ -292,13 +291,20 @@ namespace coralns {
       // Clean-up      
       if (ref != NULL) free(ref);
 
-      // Output allele support
+      // Filter for het. variants
       for (uint32_t i = 0; i<pv.size(); ++i) {
 	uint32_t totalcov = refS[i] + altS[i];
 	if (totalcov > c.minCoverage) {
 	  // Make sure both alleles are supported to select likely heterozygous germline variants, at least 10% of total depth
-	  uint32_t minSupport = std::max((int32_t) std::ceil(0.1 * (double) totalcov), 2);
-	  if ((altS[i] >= minSupport) && (refS[i] >= minSupport)) gvar[refIndex].push_back(BiallelicSupport(pv[i].pos, refS[i], altS[i]));
+	  if (cvar.empty()) {
+	    // No control, "guess" het. variants
+	    uint32_t minSupport = std::max((int32_t) std::ceil(0.1 * (double) totalcov), 2);
+	    if ((altS[i] >= minSupport) && (refS[i] >= minSupport)) gvar[refIndex].push_back(BiallelicSupport(pv[i].pos, refS[i], altS[i]));
+	  } else {
+	    // Make sure variant is present in control het. variant set
+	    typename TGenomicVariants::value_type::const_iterator vIt = std::lower_bound(cvar[refIndex].begin(), cvar[refIndex].end(), BiallelicSupport(pv[i].pos), SortVariants<BiallelicSupport>());
+	    if ((vIt != cvar[refIndex].end()) && (vIt->pos == pv[i].pos)) gvar[refIndex].push_back(BiallelicSupport(pv[i].pos, refS[i], altS[i]));
+	  }
 	}
       }
 
@@ -321,6 +327,14 @@ namespace coralns {
     return 0;
   }
 
+
+  template<typename TConfig, typename TGenomicVariants>
+  inline int32_t
+  baf(TConfig const& c, LibraryInfo const& li, TGenomicVariants& gvar) {
+    TGenomicVariants cvar;
+    return baf(c, li, cvar, gvar);
+  }
+  
 }
 
 #endif

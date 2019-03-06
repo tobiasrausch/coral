@@ -71,6 +71,7 @@ namespace coralns
     boost::filesystem::path genome;
     boost::filesystem::path statsFile;
     boost::filesystem::path mapFile;
+    boost::filesystem::path controlFile;
     boost::filesystem::path bamFile;
     boost::filesystem::path bedFile;
     boost::filesystem::path vcffile;
@@ -477,8 +478,9 @@ namespace coralns
     vcopt.add_options()
       ("basequality,a", boost::program_options::value<uint16_t>(&c.minBaseQual)->default_value(10), "min. base quality")
       ("coverage,c", boost::program_options::value<uint16_t>(&c.minCoverage)->default_value(10), "min. SNP coverage")
-      ("snps,l", boost::program_options::value<uint16_t>(&c.minSnps)->default_value(3), "min. #SNPs per segment")
+      ("snps,x", boost::program_options::value<uint16_t>(&c.minSnps)->default_value(3), "min. #SNPs per segment")
       ("vcffile,v", boost::program_options::value<boost::filesystem::path>(&c.vcffile), "input VCF file")
+      ("controlfile,l", boost::program_options::value<boost::filesystem::path>(&c.controlFile), "control file")
       ;
 
     boost::program_options::options_description hidden("Hidden options");
@@ -609,7 +611,15 @@ namespace coralns
     typedef std::vector<BiallelicSupport> TVariantSupport;
     typedef std::vector<TVariantSupport> TGenomicVariants;
     TGenomicVariants gvar(c.nchr, TVariantSupport());
-    if (vm.count("vcffile")) baf(c, li, gvar);
+    if (vm.count("vcffile")) {
+      if (vm.count("controlfile")) {
+	TGenomicVariants cvar(c.nchr, TVariantSupport());
+	baf(c, li, cvar);  // Het. germline variants
+	baf(c, li, cvar, gvar);
+      } else {
+	baf(c, li, gvar);
+      }
+    }
 
     // Scan genomic windows
     typedef std::vector<ScanWindow> TWindowCounts;
