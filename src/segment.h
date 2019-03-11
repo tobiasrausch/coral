@@ -73,55 +73,57 @@ namespace coralns
     uint32_t refIndex = 0;
     TPrecision lastCN = 0;
     TPrecision lastMAF = 0;
-    std::ifstream signalFile(c.signal.string().c_str(), std::ifstream::in);
     cnbc[refIndex].sm.resize(boost::extents[cnbc[refIndex].rows][cnbc[refIndex].cols]);
     cnbc[refIndex].itv.resize(cnbc[refIndex].rows);
-    if (signalFile.is_open()) {
-      uint32_t row = 0;
-      while (signalFile.good()) {
-	std::string sigdata;
-	getline(signalFile, sigdata);
-	while ((row >= cnbc[refIndex].rows) && (refIndex + 1 < cnbc.size())) {
-	  ++refIndex;
-	  lastCN = 0;
-	  lastMAF = 0;
-	  cnbc[refIndex].sm.resize(boost::extents[cnbc[refIndex].rows][cnbc[refIndex].cols]);
-	  cnbc[refIndex].itv.resize(cnbc[refIndex].rows);
-	  row = 0;
-	}
-	if (row < cnbc[refIndex].rows) {
-	  typedef boost::tokenizer< boost::char_separator<char> > Tokenizer;
-	  boost::char_separator<char> sep(" \t,;");
-	  Tokenizer tokens(sigdata, sep);
-	  Tokenizer::iterator tokIter = tokens.begin();
+
+    std::ifstream file(c.signal.string().c_str(), std::ios_base::in | std::ios_base::binary);
+    boost::iostreams::filtering_streambuf<boost::iostreams::input> dataIn;
+    dataIn.push(boost::iostreams::gzip_decompressor());
+    dataIn.push(file);
+    std::istream instream(&dataIn);
+    std::string sigdata;
+    uint32_t row = 0;
+    while(std::getline(instream, sigdata)) {
+      while ((row >= cnbc[refIndex].rows) && (refIndex + 1 < cnbc.size())) {
+	++refIndex;
+	lastCN = 0;
+	lastMAF = 0;
+	cnbc[refIndex].sm.resize(boost::extents[cnbc[refIndex].rows][cnbc[refIndex].cols]);
+	cnbc[refIndex].itv.resize(cnbc[refIndex].rows);
+	row = 0;
+      }
+      if (row < cnbc[refIndex].rows) {
+	typedef boost::tokenizer< boost::char_separator<char> > Tokenizer;
+	boost::char_separator<char> sep(" \t,;");
+	Tokenizer tokens(sigdata, sep);
+	Tokenizer::iterator tokIter = tokens.begin();
+	if (tokIter!=tokens.end()) {
+	  std::string chrName = *tokIter++;
 	  if (tokIter!=tokens.end()) {
-	    std::string chrName = *tokIter++;
+	    if (*tokIter == "start") continue; //header
+	    cnbc[refIndex].itv[row].first = boost::lexical_cast<uint32_t>(*tokIter++);
 	    if (tokIter!=tokens.end()) {
-	      if (*tokIter == "start") continue; //header
-	      cnbc[refIndex].itv[row].first = boost::lexical_cast<uint32_t>(*tokIter++);
-	      if (tokIter!=tokens.end()) {
-		cnbc[refIndex].itv[row].second = boost::lexical_cast<uint32_t>(*tokIter++);
-		std::string count = *tokIter++;
-		std::string cn = *tokIter++;
-		std::string maf = *tokIter;
-		if ((cn == "NaN") || (cn == "NA")) cnbc[refIndex].sm[row][0] = lastCN;
-		else {
-		  cnbc[refIndex].sm[row][0] = boost::lexical_cast<TPrecision>(cn) - 2;
-		  lastCN = cnbc[refIndex].sm[row][0];
-		}
-		if ((maf == "NaN") || (maf == "NA")) cnbc[refIndex].sm[row][1] = lastMAF;
-		else {
-		  cnbc[refIndex].sm[row][1] = boost::lexical_cast<TPrecision>(maf) - 1;
-		  lastMAF = cnbc[refIndex].sm[row][1];
-		}
+	      cnbc[refIndex].itv[row].second = boost::lexical_cast<uint32_t>(*tokIter++);
+	      std::string count = *tokIter++;
+	      std::string cn = *tokIter++;
+	      std::string maf = *tokIter;
+	      if ((cn == "NaN") || (cn == "NA")) cnbc[refIndex].sm[row][0] = lastCN;
+	      else {
+		cnbc[refIndex].sm[row][0] = boost::lexical_cast<TPrecision>(cn) - 2;
+		lastCN = cnbc[refIndex].sm[row][0];
+	      }
+	      if ((maf == "NaN") || (maf == "NA")) cnbc[refIndex].sm[row][1] = lastMAF;
+	      else {
+		cnbc[refIndex].sm[row][1] = boost::lexical_cast<TPrecision>(maf) - 1;
+		lastMAF = cnbc[refIndex].sm[row][1];
 	      }
 	    }
 	  }
-	  ++row;
 	}
+	++row;
       }
-      signalFile.close();
     }
+    dataIn.pop();
 
     // Output file
     boost::iostreams::filtering_ostream dataOutS;
@@ -207,12 +209,15 @@ namespace coralns
       return 1;
     } else {
       // Get intervals & matrix dimensions for each chromosome
-      std::ifstream signalFile(c.signal.string().c_str(), std::ifstream::in);
-      if (signalFile.is_open()) {
-	NormalizedBinCounts nbc;
-	while (signalFile.good()) {
-	  std::string sigdata;
-	  getline(signalFile, sigdata);
+      std::ifstream file(c.signal.string().c_str(), std::ios_base::in | std::ios_base::binary);
+      boost::iostreams::filtering_streambuf<boost::iostreams::input> dataIn;
+      dataIn.push(boost::iostreams::gzip_decompressor());
+      dataIn.push(file);
+      std::istream instream(&dataIn);
+      std::string sigdata;
+      NormalizedBinCounts nbc;
+      while(std::getline(instream, sigdata)) {
+	if (sigdata.size()) {
 	  typedef boost::tokenizer< boost::char_separator<char> > Tokenizer;
 	  boost::char_separator<char> sep(" \t,;");
 	  Tokenizer tokens(sigdata, sep);
@@ -235,9 +240,9 @@ namespace coralns
 	    ++nbc.rows;
 	  }
 	}
-	if ((nbc.cols) && (nbc.rows)) cnbc.push_back(nbc);
-	signalFile.close();
       }
+      if ((nbc.cols) && (nbc.rows)) cnbc.push_back(nbc);
+      dataIn.pop();
     }
     if (cnbc.empty()) {
       std::cerr << "Signal matrix format is chr, start, end, signal, ..." << std::endl;
