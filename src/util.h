@@ -98,29 +98,11 @@ namespace coralns
   };
 
 
-  struct SegmentConfig {
+  struct NormalizedBinCounts {
     typedef double TPrecision;
     typedef boost::multi_array<TPrecision, 2> TSignalMatrix;
-    
-    uint32_t k;
-    double epsilon;
-    double dpthreshold;
-    std::string outprefix;
-    boost::filesystem::path signal;
-  };
-
-  
-  struct Interval {
-    uint32_t istart;
-    uint32_t iend;
-    
-    Interval() : istart(0), iend(0) {}
-    Interval(uint32_t a, uint32_t b) : istart(a), iend(b) {}
-  };  
-  
-  struct NormalizedBinCounts {
-    typedef SegmentConfig::TSignalMatrix TSignalMatrix;
-    typedef std::vector<Interval> TIntervals;
+    typedef std::pair<uint32_t, uint32_t> TStartEnd;
+    typedef std::vector<TStartEnd> TIntervals;
     std::string chr;
     uint32_t rows;
     uint32_t cols;

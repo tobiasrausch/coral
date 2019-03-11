@@ -57,17 +57,25 @@ Contact: Tobias Rausch (rausch@embl.de)
 namespace coralns
 {
 
+  struct SegmentConfig {
+    uint32_t k;
+    double epsilon;
+    double dpthreshold;
+    boost::filesystem::path outfile;
+    boost::filesystem::path signal;
+  };
+  
   
   inline int32_t
   runSegmentation(SegmentConfig const& c, std::vector<NormalizedBinCounts>& cnbc) {
-    typedef SegmentConfig::TPrecision TPrecision;
-
+    typedef NormalizedBinCounts::TPrecision TPrecision;
     // Parse signal matrix
     uint32_t refIndex = 0;
-    
-    std::vector<TPrecision> lastVal(cnbc[refIndex].cols, 0.0);
+    TPrecision lastCN = 0;
+    TPrecision lastMAF = 0;
     std::ifstream signalFile(c.signal.string().c_str(), std::ifstream::in);
     cnbc[refIndex].sm.resize(boost::extents[cnbc[refIndex].rows][cnbc[refIndex].cols]);
+    cnbc[refIndex].itv.resize(cnbc[refIndex].rows);
     if (signalFile.is_open()) {
       uint32_t row = 0;
       while (signalFile.good()) {
@@ -75,8 +83,10 @@ namespace coralns
 	getline(signalFile, sigdata);
 	while ((row >= cnbc[refIndex].rows) && (refIndex + 1 < cnbc.size())) {
 	  ++refIndex;
-	  std::fill(lastVal.begin(), lastVal.end(), 0.0);
+	  lastCN = 0;
+	  lastMAF = 0;
 	  cnbc[refIndex].sm.resize(boost::extents[cnbc[refIndex].rows][cnbc[refIndex].cols]);
+	  cnbc[refIndex].itv.resize(cnbc[refIndex].rows);
 	  row = 0;
 	}
 	if (row < cnbc[refIndex].rows) {
@@ -85,20 +95,24 @@ namespace coralns
 	  Tokenizer tokens(sigdata, sep);
 	  Tokenizer::iterator tokIter = tokens.begin();
 	  if (tokIter!=tokens.end()) {
-	    ++tokIter;
+	    std::string chrName = *tokIter++;
 	    if (tokIter!=tokens.end()) {
-	      ++tokIter;
+	      if (*tokIter == "start") continue; //header
+	      cnbc[refIndex].itv[row].first = boost::lexical_cast<uint32_t>(*tokIter++);
 	      if (tokIter!=tokens.end()) {
-		++tokIter;
-		uint32_t col = 0;
-		for(;tokIter != tokens.end(); ++tokIter, ++col) {
-		  if (col < cnbc[refIndex].cols) {
-		    if ((*tokIter == "NaN") || (*tokIter == "NA")) cnbc[refIndex].sm[row][col] = lastVal[col]; // Carry forward old value
-		    else {
-		      cnbc[refIndex].sm[row][col] = boost::lexical_cast<TPrecision>(*tokIter) - 2;
-		      lastVal[col] = cnbc[refIndex].sm[row][col];
-		    }
-		  }
+		cnbc[refIndex].itv[row].second = boost::lexical_cast<uint32_t>(*tokIter++);
+		std::string count = *tokIter++;
+		std::string cn = *tokIter++;
+		std::string maf = *tokIter;
+		if ((cn == "NaN") || (cn == "NA")) cnbc[refIndex].sm[row][0] = lastCN;
+		else {
+		  cnbc[refIndex].sm[row][0] = boost::lexical_cast<TPrecision>(cn) - 2;
+		  lastCN = cnbc[refIndex].sm[row][0];
+		}
+		if ((maf == "NaN") || (maf == "NA")) cnbc[refIndex].sm[row][1] = lastMAF;
+		else {
+		  cnbc[refIndex].sm[row][1] = boost::lexical_cast<TPrecision>(maf) - 1;
+		  lastMAF = cnbc[refIndex].sm[row][1];
 		}
 	      }
 	    }
@@ -109,23 +123,11 @@ namespace coralns
       signalFile.close();
     }
 
-    // Output matrix
-    /*
-    std::string outMatrix = c.outprefix + ".raw.gz";
-    boost::iostreams::filtering_ostream dataOut;
-    dataOut.push(boost::iostreams::gzip_compressor());
-    dataOut.push(boost::iostreams::file_sink(outMatrix.c_str(), std::ios_base::out | std::ios_base::binary));
-    for(uint32_t refIndex = 0; refIndex < cnbc.size(); ++refIndex) {
-      for(uint32_t i = 0; i < cnbc[refIndex].rows; ++i) {
-	dataOut << cnbc[refIndex].chr << '\t' << cnbc[refIndex].itv[i].istart << '\t' << cnbc[refIndex].itv[i].iend;
-	for(uint32_t j = 0; j < cnbc[refIndex].cols; ++j) {
-	  dataOut << '\t' << cnbc[refIndex].sm[i][j];
-	}
-	dataOut << std::endl;
-      }
-    }
-    dataOut.pop();
-    */
+    // Output file
+    boost::iostreams::filtering_ostream dataOutS;
+    dataOutS.push(boost::iostreams::gzip_compressor());
+    dataOutS.push(boost::iostreams::file_sink(c.outfile.string().c_str(), std::ios_base::out | std::ios_base::binary));
+    dataOutS << "chr\tstart\tend\tcn\tmaf" << std::endl;
     
     // Iterate chromosomes
     for(uint32_t refIndex = 0; refIndex < cnbc.size(); ++refIndex) {
@@ -142,46 +144,17 @@ namespace coralns
       // Smooth signal
       SmoothSignal smoo;
       smoothsignal(cnbc[refIndex].sm, res.kbestjump, smoo);
-      // updown stats
-      updown(smoo);
       //expandpiecewiseconstant(smoo.jumps, smoo.smooth, res.smooth);
       
       // Output matrix
-      std::string outFileName = c.outprefix + "." + cnbc[refIndex].chr + ".smooth.gz";
-      boost::iostreams::filtering_ostream dataOutS;
-      dataOutS.push(boost::iostreams::gzip_compressor());
-      dataOutS.push(boost::iostreams::file_sink(outFileName.c_str(), std::ios_base::out | std::ios_base::binary));
-      dataOutS << "chr\tstart\tend\tsignal\tsample\ttype" << std::endl;
-      uint32_t istart = cnbc[refIndex].itv[0].istart;
+      uint32_t istart = cnbc[refIndex].itv[0].first;
       for(uint32_t i = 0; i<smoo.jumps.size(); ++i) {
-	if (i) istart = cnbc[refIndex].itv[smoo.jumps[i-1]+1].istart;
-	uint32_t iend = cnbc[refIndex].itv[smoo.jumps[i]].iend;
-	for(uint32_t j = 0; j < cnbc[refIndex].cols; ++j) {
-	  std::string type = "neutral";
-	  if (smoo.smooth[i][j] > 0.5) type = "gain";
-	  else if (smoo.smooth[i][j] < -0.5) type = "loss";
-	  dataOutS << cnbc[refIndex].chr << '\t' << istart << '\t' << iend << '\t' << smoo.smooth[i][j] << "\tS" << j << "\t" << type << std::endl;
-	}
+	if (i) istart = cnbc[refIndex].itv[smoo.jumps[i-1]+1].first;
+	uint32_t iend = cnbc[refIndex].itv[smoo.jumps[i]].second;
+	dataOutS << cnbc[refIndex].chr << '\t' << istart << '\t' << iend << '\t' << smoo.smooth[i][0] + 2 << '\t' << smoo.smooth[i][1] + 1 << std::endl;
       }
-    
-    
-      // Debug dump
-      std::cout << cnbc[refIndex].chr << std::endl;
-      for(uint32_t r = 0; r<smoo.updown.shape()[0]; ++r) {
-	for(uint32_t c = 0; c<smoo.updown.shape()[1]; ++c) {
-	  std::cout << smoo.updown[r][c] << ',';
-	}
-	std::cout << std::endl;
-      }
-      /*
-	for(uint32_t r = 0; r<smoo.smooth.shape()[0]; ++r) {
-	for(uint32_t c = 0; c<smoo.smooth.shape()[1]; ++c) {
-	std::cout << smoo.smooth[r][c] << ',';
-	}
-	std::cout << std::endl;
-	}
-      */
     }
+    dataOutS.pop();
   
     // End
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
@@ -200,7 +173,7 @@ namespace coralns
       ("dpthreshold,d", boost::program_options::value<double>(&c.dpthreshold)->default_value(0.5), "DP threshold")
       ("epsilon,e", boost::program_options::value<double>(&c.epsilon)->default_value(1e-9), "epsilon error")
       ("kchange,k", boost::program_options::value<uint32_t>(&c.k)->default_value(100), "change points per chr")
-      ("outprefix,p", boost::program_options::value<std::string>(&c.outprefix)->default_value("signal"), "output file prefix")
+      ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("segment.gz"), "output file")
       ;
 
     boost::program_options::options_description hidden("Hidden options");
@@ -225,7 +198,7 @@ namespace coralns
       std::cout << visible_options << "\n";
       return 1;
     }
-    
+
     // Parse matrix
     typedef std::vector<NormalizedBinCounts> TChrBinCounts;
     TChrBinCounts cnbc;
@@ -246,24 +219,20 @@ namespace coralns
 	  Tokenizer::iterator tokIter = tokens.begin();
 	  if (tokIter!=tokens.end()) {
 	    std::string chrName = *tokIter++;
-	    if (tokIter!=tokens.end()) {
-	      uint32_t start = boost::lexical_cast<uint32_t>(*tokIter++);
-	      if (tokIter!=tokens.end()) {
-		uint32_t end = boost::lexical_cast<uint32_t>(*tokIter++);
-		int32_t col = 0;
-		for(;tokIter != tokens.end(); ++tokIter) ++col;
-		if (nbc.chr != chrName) {
-		  if ((nbc.cols) && (nbc.rows)) cnbc.push_back(nbc);
-		  nbc.chr = chrName;
-		  nbc.cols = col;
-		  //nbc.cols = 18;
-		  nbc.rows = 0;
-		  nbc.itv.clear();
-		}
-		nbc.itv.push_back(Interval(start, end));
-		++nbc.rows;
-	      }
+	    if ((tokIter == tokens.end()) || (*tokIter == "start")) continue; //header
+	    ++tokIter; // start
+	    if (tokIter == tokens.end()) continue;
+	    ++tokIter; // end
+	    int32_t col = 0;
+	    for(;tokIter != tokens.end(); ++tokIter) ++col;
+	    if (nbc.chr != chrName) {
+	      if ((nbc.cols) && (nbc.rows)) cnbc.push_back(nbc);
+	      nbc.chr = chrName;
+	      //nbc.cols = col;
+	      nbc.cols = 2;
+	      nbc.rows = 0;
 	    }
+	    ++nbc.rows;
 	  }
 	}
 	if ((nbc.cols) && (nbc.rows)) cnbc.push_back(nbc);
