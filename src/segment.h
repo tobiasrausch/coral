@@ -65,65 +65,73 @@ namespace coralns
     boost::filesystem::path signal;
   };
   
-  
-  inline int32_t
-  runSegmentation(SegmentConfig const& c, std::vector<NormalizedBinCounts>& cnbc) {
-    typedef NormalizedBinCounts::TPrecision TPrecision;
-    // Parse signal matrix
-    uint32_t refIndex = 0;
-    TPrecision lastCN = 0;
-    TPrecision lastMAF = 0;
-    cnbc[refIndex].sm.resize(boost::extents[cnbc[refIndex].rows][cnbc[refIndex].cols]);
-    cnbc[refIndex].itv.resize(cnbc[refIndex].rows);
 
-    std::ifstream file(c.signal.string().c_str(), std::ios_base::in | std::ios_base::binary);
-    boost::iostreams::filtering_streambuf<boost::iostreams::input> dataIn;
-    dataIn.push(boost::iostreams::gzip_decompressor());
-    dataIn.push(file);
-    std::istream instream(&dataIn);
-    std::string sigdata;
-    uint32_t row = 0;
-    while(std::getline(instream, sigdata)) {
-      while ((row >= cnbc[refIndex].rows) && (refIndex + 1 < cnbc.size())) {
-	++refIndex;
-	lastCN = 0;
-	lastMAF = 0;
-	cnbc[refIndex].sm.resize(boost::extents[cnbc[refIndex].rows][cnbc[refIndex].cols]);
-	cnbc[refIndex].itv.resize(cnbc[refIndex].rows);
-	row = 0;
-      }
-      if (row < cnbc[refIndex].rows) {
-	typedef boost::tokenizer< boost::char_separator<char> > Tokenizer;
-	boost::char_separator<char> sep(" \t,;");
-	Tokenizer tokens(sigdata, sep);
-	Tokenizer::iterator tokIter = tokens.begin();
-	if (tokIter!=tokens.end()) {
-	  std::string chrName = *tokIter++;
-	  if (tokIter!=tokens.end()) {
-	    if (*tokIter == "start") continue; //header
-	    cnbc[refIndex].itv[row].first = boost::lexical_cast<uint32_t>(*tokIter++);
-	    if (tokIter!=tokens.end()) {
-	      cnbc[refIndex].itv[row].second = boost::lexical_cast<uint32_t>(*tokIter++);
-	      std::string count = *tokIter++;
-	      std::string cn = *tokIter++;
-	      std::string maf = *tokIter;
-	      if ((cn == "NaN") || (cn == "NA")) cnbc[refIndex].sm[row][0] = lastCN;
-	      else {
-		cnbc[refIndex].sm[row][0] = boost::lexical_cast<TPrecision>(cn) - 2;
-		lastCN = cnbc[refIndex].sm[row][0];
-	      }
-	      if ((maf == "NaN") || (maf == "NA")) cnbc[refIndex].sm[row][1] = lastMAF;
-	      else {
-		cnbc[refIndex].sm[row][1] = boost::lexical_cast<TPrecision>(maf) - 1;
-		lastMAF = cnbc[refIndex].sm[row][1];
-	      }
-	    }
+
+  struct NormalizedBinCounts {
+    typedef double TPrecision;
+    typedef boost::multi_array<TPrecision, 2> TSignalMatrix;
+    typedef std::pair<uint32_t, uint32_t> TStartEnd;
+    typedef std::vector<TStartEnd> TIntervals;
+    std::string chr;
+    uint32_t rows;
+    uint32_t cols;
+    TIntervals itv;
+    TSignalMatrix sm;
+    
+    NormalizedBinCounts() : chr(""), rows(0), cols(0) {}
+  };
+
+
+  struct SmoothSignal {
+    typedef Recap::TPrecision TPrecision;
+    typedef std::vector<uint32_t> TIndexVector;
+    typedef boost::multi_array<TPrecision, 2> TSignalMatrix;
+
+    TIndexVector jumps;
+    TSignalMatrix smooth;
+    TSignalMatrix updown;
+  };
+  
+  template<typename TSignalMatrix>
+  inline void
+  smoothsignal(TSignalMatrix const& sm, std::vector<uint32_t> const& jumps, SmoothSignal& res) {
+    typedef Recap::TPrecision TPrecision;
+    uint32_t nrow = sm.shape()[0];
+    uint32_t ncol = sm.shape()[1];
+    
+    std::vector<int32_t> b(jumps.begin(), jumps.end());
+    b.push_back(-1);
+    b.push_back(nrow-1);
+    std::sort(b.begin(), b.end());
+
+    res.jumps.clear();
+    for(uint32_t i = 1; i < b.size(); ++i) res.jumps.push_back(b[i]);
+    uint32_t k = res.jumps.size();
+    res.smooth.resize(boost::extents[k][ncol]);
+    for(uint32_t i = 0; i < k; ++i) {
+      uint32_t istart = b[i] + 1;
+      uint32_t iend = b[i+1] + 1;
+      for(uint32_t j = 0; j < ncol; ++j) {
+	std::vector<TPrecision> avg;
+	TPrecision lastVal = 0;
+	for(uint32_t ki = istart; ki<iend; ++ki) {
+	  if ((ki == istart) || (lastVal != sm[ki][j])) {
+	    //if (!j) std::cout << ',' << sm[ki][j] + 2;
+	    //else std::cout << ',' << sm[ki][j] + 1;
+	    avg.push_back(sm[ki][j]);
+	    lastVal = sm[ki][j];
 	  }
 	}
-	++row;
+	std::sort(avg.begin(), avg.end());
+	res.smooth[i][j] = avg[avg.size() / 2];
+	//if (!j) std::cout << j << ':' << res.smooth[i][j] + 2 << std::endl;
+	//else std::cout << j << ':' << res.smooth[i][j] + 1 << std::endl;
       }
     }
-    dataIn.pop();
+  }
+
+  inline int32_t
+  runSegmentation(SegmentConfig const& c, std::vector<NormalizedBinCounts> const& cnbc) {
 
     // Output file
     boost::iostreams::filtering_ostream dataOutS;
@@ -249,6 +257,65 @@ namespace coralns
       return 1;
     }
 
+
+    typedef NormalizedBinCounts::TPrecision TPrecision;
+    // Parse signal matrix
+    uint32_t refIndex = 0;
+    TPrecision lastCN = 0;
+    TPrecision lastMAF = 0;
+    cnbc[refIndex].sm.resize(boost::extents[cnbc[refIndex].rows][cnbc[refIndex].cols]);
+    cnbc[refIndex].itv.resize(cnbc[refIndex].rows);
+
+    std::ifstream file(c.signal.string().c_str(), std::ios_base::in | std::ios_base::binary);
+    boost::iostreams::filtering_streambuf<boost::iostreams::input> dataIn;
+    dataIn.push(boost::iostreams::gzip_decompressor());
+    dataIn.push(file);
+    std::istream instream(&dataIn);
+    std::string sigdata;
+    uint32_t row = 0;
+    while(std::getline(instream, sigdata)) {
+      while ((row >= cnbc[refIndex].rows) && (refIndex + 1 < cnbc.size())) {
+	++refIndex;
+	lastCN = 0;
+	lastMAF = 0;
+	cnbc[refIndex].sm.resize(boost::extents[cnbc[refIndex].rows][cnbc[refIndex].cols]);
+	cnbc[refIndex].itv.resize(cnbc[refIndex].rows);
+	row = 0;
+      }
+      if (row < cnbc[refIndex].rows) {
+	typedef boost::tokenizer< boost::char_separator<char> > Tokenizer;
+	boost::char_separator<char> sep(" \t,;");
+	Tokenizer tokens(sigdata, sep);
+	Tokenizer::iterator tokIter = tokens.begin();
+	if (tokIter!=tokens.end()) {
+	  std::string chrName = *tokIter++;
+	  if (tokIter!=tokens.end()) {
+	    if (*tokIter == "start") continue; //header
+	    cnbc[refIndex].itv[row].first = boost::lexical_cast<uint32_t>(*tokIter++);
+	    if (tokIter!=tokens.end()) {
+	      cnbc[refIndex].itv[row].second = boost::lexical_cast<uint32_t>(*tokIter++);
+	      std::string count = *tokIter++;
+	      std::string cn = *tokIter++;
+	      std::string maf = *tokIter;
+	      if ((cn == "NaN") || (cn == "NA")) cnbc[refIndex].sm[row][0] = lastCN;
+	      else {
+		cnbc[refIndex].sm[row][0] = boost::lexical_cast<TPrecision>(cn) - 2;
+		lastCN = cnbc[refIndex].sm[row][0];
+	      }
+	      if ((maf == "NaN") || (maf == "NA")) cnbc[refIndex].sm[row][1] = lastMAF;
+	      else {
+		cnbc[refIndex].sm[row][1] = boost::lexical_cast<TPrecision>(maf) - 1;
+		lastMAF = cnbc[refIndex].sm[row][1];
+	      }
+	    }
+	  }
+	}
+	++row;
+      }
+    }
+    dataIn.pop();
+
+    
     // Show cmd
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] ";
