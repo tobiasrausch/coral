@@ -1,7 +1,7 @@
 .htslib
 src/coral
 bin/
-refpanel/
+snps1kGP/
 *~
 
 # Compiled Object files
