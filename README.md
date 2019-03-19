@@ -1,11 +1,10 @@
-Installation - Cybrarian
-------------
+Installation Coral
+------------------
 
 
+`git clone --recursive https://github.com/tobiasrausch/coral.git`
 
-`git clone --recursive https://github.com/tobiasrausch/sc.git`
-
-`cd sc/`
+`cd coral/`
 
 `make all`
 
