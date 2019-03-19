@@ -1,3 +1,8 @@
+[![Build Status](https://travis-ci.org/tobiasrausch/coral.svg?branch=master)](https://travis-ci.org/tobiasrausch/coral)
+[![GitHub license](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://raw.githubusercontent.com/tobiasrausch/coral/master/LICENSE)
+[![GitHub Issues](https://img.shields.io/github/issues/tobiasrausch/coral.svg)](https://github.com/tobiasrausch/coral/issues)
+
+
 Installation Coral
 ------------------
 
