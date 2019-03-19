@@ -42,6 +42,11 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include <boost/iostreams/filtering_stream.hpp>
 #include <boost/iostreams/filter/zlib.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
+#include <boost/accumulators/accumulators.hpp>
+#include <boost/accumulators/statistics/stats.hpp>
+#include <boost/accumulators/statistics/mean.hpp>
+#include <boost/accumulators/statistics/moment.hpp>
+#include <boost/accumulators/statistics/variance.hpp>
 #include <boost/multi_array.hpp>
 #include <boost/tokenizer.hpp>
 #include <boost/filesystem.hpp>
@@ -91,6 +96,71 @@ namespace coralns
     TSignalMatrix smooth;
     TSignalMatrix updown;
   };
+
+
+  template<typename TVector>
+  inline void
+  meanSd(TVector const& vec, double& mean, double& sd) {
+    boost::accumulators::accumulator_set<double, boost::accumulators::stats<boost::accumulators::tag::variance(boost::accumulators::lazy)> > acc;
+    for_each(vec.begin(), vec.end(), boost::bind<void>(boost::ref(acc), _1));
+    mean = boost::accumulators::mean(acc);
+    sd = std::sqrt(boost::accumulators::variance(acc));
+  }
+
+  template<typename TSignalMatrix>  
+  inline void
+  undoBreaks(TSignalMatrix const& sm, std::vector<uint32_t> const& jumps, std::vector<uint32_t>& outj, double const scale) {
+    typedef Recap::TPrecision TPrecision;
+    uint32_t nrow = sm.shape()[0];
+    uint32_t ncol = sm.shape()[1];
+
+    uint32_t k = jumps.size();
+    std::vector<int32_t> b(jumps.begin(), jumps.end());
+    b.push_back(-1);
+    b.push_back(nrow - 1);
+    std::sort(b.begin(), b.end());
+
+    // Collect mean and sd values
+    boost::multi_array<double, 2> meanVal;
+    meanVal.resize(boost::extents[k+1][ncol]);
+    boost::multi_array<double, 2> sdVal;
+    sdVal.resize(boost::extents[k+1][ncol]);
+    boost::multi_array<int32_t, 2> marker;
+    marker.resize(boost::extents[k+1][ncol]);
+    for(uint32_t i = 0; i <= k; ++i) {
+      uint32_t istart = b[i] + 1;
+      uint32_t iend = b[i+1] + 1;
+      for(uint32_t j = 0; j < ncol; ++j) {
+	boost::accumulators::accumulator_set<double, boost::accumulators::stats<boost::accumulators::tag::variance(boost::accumulators::lazy)> > acc;
+	TPrecision lastVal = 0;
+	int32_t n = 0;
+	for(uint32_t ki = istart; ki<iend; ++ki) {
+	  if ((ki == istart) || (lastVal != sm[ki][j])) {
+	    acc(sm[ki][j]);
+	    lastVal = sm[ki][j];
+	    ++n;
+	  }
+	}
+	meanVal[i][j] = boost::accumulators::mean(acc);
+	sdVal[i][j] = std::sqrt(boost::accumulators::variance(acc));
+	marker[i][j] = n;
+      }
+    }
+
+    for(uint32_t i = 0; i < k; ++i) {
+      bool keepBreak = false;
+      for(uint32_t j = 0; j < ncol; ++j) {
+	double diffMean = std::abs(meanVal[i][j] - meanVal[i+1][j]);
+	if ((marker[i][j] >= 5) && (marker[i+1][j] >= 5)) {
+	  if ((diffMean > scale * sdVal[i][j]) || (diffMean > scale * sdVal[i+1][j])) {
+	    keepBreak = true;
+	    break;
+	  }
+	}
+      }
+      if (keepBreak) outj.push_back(b[i+1]);
+    }      
+  }
   
   template<typename TSignalMatrix>
   inline void
@@ -151,6 +221,17 @@ namespace coralns
       // DP
       dpseg(c, cnbc[refIndex].sm, res);
 
+      // SD undo with 1 * SD
+      uint32_t newBreakSize = res.kbestjump.size();
+      uint32_t oldBreakSize = newBreakSize + 1;
+      while (newBreakSize != oldBreakSize) {
+	std::vector<uint32_t> finalJumps;
+	oldBreakSize = newBreakSize;
+	undoBreaks(cnbc[refIndex].sm, res.kbestjump, finalJumps, 1.0);
+	res.kbestjump = finalJumps;
+	newBreakSize = res.kbestjump.size();
+      }
+      
       // Smooth signal
       SmoothSignal smoo;
       smoothsignal(cnbc[refIndex].sm, res.kbestjump, smoo);
@@ -166,49 +247,12 @@ namespace coralns
     }
     dataOutS.pop();
   
-    // End
-    boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Done." << std::endl;;
     return 0;
   }
 
 
-  int segment(int argc, char **argv) {
-    SegmentConfig c;
-
-    // Parameter
-    boost::program_options::options_description generic("Generic options");
-    generic.add_options()
-      ("help,?", "show help message")
-      ("dpthreshold,d", boost::program_options::value<double>(&c.dpthreshold)->default_value(0.5), "DP threshold")
-      ("epsilon,e", boost::program_options::value<double>(&c.epsilon)->default_value(1e-9), "epsilon error")
-      ("kchange,k", boost::program_options::value<uint32_t>(&c.k)->default_value(100), "change points per chr")
-      ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("segment.gz"), "output file")
-      ;
-
-    boost::program_options::options_description hidden("Hidden options");
-    hidden.add_options()
-      ("input-file", boost::program_options::value<boost::filesystem::path>(&c.signal), "input signal matrix")
-      ;
-
-    boost::program_options::positional_options_description pos_args;
-    pos_args.add("input-file", -1);
-
-    boost::program_options::options_description cmdline_options;
-    cmdline_options.add(generic).add(hidden);
-    boost::program_options::options_description visible_options;
-    visible_options.add(generic);
-    boost::program_options::variables_map vm;
-    boost::program_options::store(boost::program_options::command_line_parser(argc, argv).options(cmdline_options).positional(pos_args).run(), vm);
-    boost::program_options::notify(vm);
-
-    // Check command line arguments
-    if ((vm.count("help")) || (!vm.count("input-file"))) {
-      std::cout << "Usage: " << argv[0] << " [OPTIONS] <signal.tsv>" << std::endl;
-      std::cout << visible_options << "\n";
-      return 1;
-    }
-
+  inline int32_t
+  segmentCovBaf(SegmentConfig const& c) {
     // Parse matrix
     typedef std::vector<NormalizedBinCounts> TChrBinCounts;
     TChrBinCounts cnbc;
@@ -315,14 +359,61 @@ namespace coralns
     }
     dataIn.pop();
 
-    
+    return runSegmentation(c, cnbc);
+  }
+
+  
+  int segment(int argc, char **argv) {
+    SegmentConfig c;
+
+    // Parameter
+    boost::program_options::options_description generic("Generic options");
+    generic.add_options()
+      ("help,?", "show help message")
+      ("dpthreshold,d", boost::program_options::value<double>(&c.dpthreshold)->default_value(0.5), "DP threshold")
+      ("epsilon,e", boost::program_options::value<double>(&c.epsilon)->default_value(1e-9), "epsilon error")
+      ("kchange,k", boost::program_options::value<uint32_t>(&c.k)->default_value(300), "change points per chr")
+      ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("segment.gz"), "output file")
+      ;
+
+    boost::program_options::options_description hidden("Hidden options");
+    hidden.add_options()
+      ("input-file", boost::program_options::value<boost::filesystem::path>(&c.signal), "input signal matrix")
+      ;
+
+    boost::program_options::positional_options_description pos_args;
+    pos_args.add("input-file", -1);
+
+    boost::program_options::options_description cmdline_options;
+    cmdline_options.add(generic).add(hidden);
+    boost::program_options::options_description visible_options;
+    visible_options.add(generic);
+    boost::program_options::variables_map vm;
+    boost::program_options::store(boost::program_options::command_line_parser(argc, argv).options(cmdline_options).positional(pos_args).run(), vm);
+    boost::program_options::notify(vm);
+
+    // Check command line arguments
+    if ((vm.count("help")) || (!vm.count("input-file"))) {
+      std::cout << "Usage: " << argv[0] << " [OPTIONS] <signal.tsv>" << std::endl;
+      std::cout << visible_options << "\n";
+      return 1;
+    }
+
     // Show cmd
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] ";
     for(int i=0; i<argc; ++i) { std::cout << argv[i] << ' '; }
     std::cout << std::endl;
     
-    return runSegmentation(c, cnbc);
+    int32_t retVal = segmentCovBaf(c);
+    if (retVal != 0) return retVal;
+
+    // End
+    now = boost::posix_time::second_clock::local_time();
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Done." << std::endl;
+
+    return 0;
+
   }
 
 }

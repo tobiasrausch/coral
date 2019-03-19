@@ -50,9 +50,9 @@ displayUsage() {
   std::cout << std::endl;
   std::cout << "Commands:" << std::endl;
   std::cout << std::endl;
-  std::cout << "    count        count reads" << std::endl;
-  std::cout << "    merge        merge counts" << std::endl;
-  std::cout << "    segment      segment coverage" << std::endl;
+  std::cout << "    call        copy-number alterations" << std::endl;
+  //std::cout << "    merge        merge counts" << std::endl;
+  //std::cout << "    segment      segment coverage" << std::endl;
   std::cout << std::endl;
   std::cout << std::endl;
 }
@@ -81,7 +81,7 @@ int main(int argc, char **argv) {
     gplV3();
     return 0;
   }
-  else if ((std::string(argv[1]) == "count")) {
+  else if ((std::string(argv[1]) == "call")) {
     return countReads(argc-1,argv+1);
   }
   else if ((std::string(argv[1]) == "merge")) {

@@ -38,6 +38,7 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include "cnv.h"
 #include "bed.h"
 #include "version.h"
+#include "segment.h"
 #include "scan.h"
 #include "util.h"
 
@@ -454,10 +455,6 @@ namespace coralns
     dataOutFixed.pop();
     dataOutAdapt.pop();
     dataOutBaf.pop();
-    
-    // Done
-    now = boost::posix_time::second_clock::local_time();
-    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Done." << std::endl;
     return 0;
   }
 
@@ -692,7 +689,23 @@ namespace coralns
     }
     
     // Count reads
-    return bamCount(c, li, gcbias, gcbound, cvar, gvar);
+    int32_t ret = bamCount(c, li, gcbias, gcbound, cvar, gvar);
+    if (ret != 0) return ret;
+
+    // Segment
+    SegmentConfig segc;
+    segc.k = 300;
+    segc.epsilon = 1e-9;
+    segc.dpthreshold = 0.5;
+    segc.outfile = boost::filesystem::path(c.outprefix + ".segment.gz");
+    segc.signal = boost::filesystem::path(c.outprefix + ".adaptive.cov.gz");
+    segmentCovBaf(segc);
+    
+    // Done
+    now = boost::posix_time::second_clock::local_time();
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Done." << std::endl;
+
+    return 0;
   }
 
   
