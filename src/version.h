@@ -26,7 +26,7 @@ namespace coralns
 {
 
 
-  std::string coralVersionNumber = "0.1.7";
+  std::string coralVersionNumber = "0.1.8";
 
   inline 
     void printTitle(std::string const& title) 
