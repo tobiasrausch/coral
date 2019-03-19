@@ -25,7 +25,7 @@ Running Coral
 
 Segmentation plots you can generate using:
 
-`Rscript /opt/dev/sc/R/rd.R outprefix.adaptive.cov.gz outprefix.segment.gz`
+`Rscript ./R/rd.R outprefix.adaptive.cov.gz outprefix.segment.gz`
 
 
 Germline/Somatic Copy-Number Calling
