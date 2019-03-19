@@ -18,7 +18,7 @@ Reference Bundle
 
 You then need to download the reference bundle with mappability maps and 1000 Genomes SNPs (~737Mb).
 
-[Download Reference Bundle](https://drive.google.com/uc?export=download&id=1EfM4SdIYv4vAwz-Ri9nMxoCd4vZMMBf4)
+[Download Reference Bundle](https://gear.embl.de/data/coral/referenceBundle.tar.gz)
 
 `tar -xzf referenceBundle.tar.gz`
 
