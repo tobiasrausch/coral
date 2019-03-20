@@ -110,12 +110,12 @@ namespace coralns
     boost::iostreams::filtering_ostream dataOutFixed;
     dataOutFixed.push(boost::iostreams::gzip_compressor());
     dataOutFixed.push(boost::iostreams::file_sink(filename.c_str(), std::ios_base::out | std::ios_base::binary));
-    dataOutFixed << "chr\tstart\tend\t" << c.sampleName << "_counts\t" << c.sampleName << "_CN\t" << c.sampleName << "_MAF" << std::endl;
+    dataOutFixed << "chr\tstart\tend\t" << c.sampleName << "_mappable\t" << c.sampleName << "_counts\t" << c.sampleName << "_CN\t" << c.sampleName << "_MAF" << std::endl;
     filename = c.outprefix + ".adaptive.cov.gz";
     boost::iostreams::filtering_ostream dataOutAdapt;
     dataOutAdapt.push(boost::iostreams::gzip_compressor());
     dataOutAdapt.push(boost::iostreams::file_sink(filename.c_str(), std::ios_base::out | std::ios_base::binary));
-    dataOutAdapt << "chr\tstart\tend\t" << c.sampleName << "_counts\t" << c.sampleName << "_CN\t" << c.sampleName << "_MAF" << std::endl;
+    dataOutAdapt << "chr\tstart\tend\t" << c.sampleName << "_mappable\t" << c.sampleName << "_counts\t" << c.sampleName << "_CN\t" << c.sampleName << "_MAF" << std::endl;
     filename = c.outprefix + ".baf.gz";
     boost::iostreams::filtering_ostream dataOutBaf;
     dataOutBaf.push(boost::iostreams::gzip_compressor());
@@ -296,7 +296,7 @@ namespace coralns
 		      obsexp /= (double) winlen;
 		      double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
 		      double cn = 2 * covsum / expcov;
-		      dataOutAdapt << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << count << "\t" << cn;
+		      dataOutAdapt << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << winlen << "\t" << count << "\t" << cn;
 		      double maf = mafSegment(c, start, pos + 1, cvar[refIndex], gvar[refIndex]);
 		      if (maf != -1) dataOutAdapt << "\t" << maf << std::endl;
 		      else dataOutAdapt << "\tNA" << std::endl;
@@ -351,16 +351,16 @@ namespace coralns
 		  ++winlen;
 		}
 	      }
-	      if (2 * winlen > (it->second - it->first)) {
+	      if (winlen >= c.fracWindow * (it->second - it->first)) {
 		obsexp /= (double) winlen;
 		double count = ((double) covsum / obsexp ) * (double) (it->second - it->first) / (double) winlen;
 		double cn = 2 * covsum / expcov;
-		dataOutFixed << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\t" << count << "\t" << cn;
+		dataOutFixed << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\t" << winlen << "\t" << count << "\t" << cn;
 		double maf = mafSegment(c, it->first, it->second, cvar[refIndex], gvar[refIndex]);
 		if (maf != -1) dataOutFixed << "\t" << maf << std::endl;
 		else dataOutFixed << "\tNA" << std::endl;
 	      } else {
-		dataOutFixed << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\tNA\tNA\tNA" << std::endl;
+		dataOutFixed << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\tNA\tNA\tNA\tNA" << std::endl;
 	      }
 	    }
 	  }
@@ -384,7 +384,7 @@ namespace coralns
 		obsexp /= (double) winlen;
 		double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
 		double cn = 2 * covsum / expcov;
-		dataOutAdapt << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << count << "\t" << cn;
+		dataOutAdapt << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << winlen << "\t" << count << "\t" << cn;
 		double maf = mafSegment(c, start, pos + 1, cvar[refIndex], gvar[refIndex]);
 		if (maf != -1) dataOutAdapt << "\t" << maf << std::endl;
 		else dataOutAdapt << "\tNA" << std::endl;
@@ -435,7 +435,7 @@ namespace coralns
 		obsexp /= (double) winlen;
 		double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
 		double cn = 2 * covsum / expcov;
-		dataOutFixed << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (start + c.window_size) << "\t" << count << "\t" << cn;
+		dataOutFixed << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (start + c.window_size) << "\t" << winlen << "\t" << count << "\t" << cn;
 		double maf = mafSegment(c, start, start + c.window_size, cvar[refIndex], gvar[refIndex]);
 		if (maf != -1) dataOutFixed << "\t" << maf << std::endl;
 		else dataOutFixed << "\tNA" << std::endl;
@@ -483,7 +483,7 @@ namespace coralns
       ("window-size,i", boost::program_options::value<uint32_t>(&c.window_size)->default_value(10000), "window size")
       ("window-offset,j", boost::program_options::value<uint32_t>(&c.window_offset)->default_value(10000), "window offset")
       ("bed-intervals,b", boost::program_options::value<boost::filesystem::path>(&c.bedFile), "input BED file")
-      ("fraction-window,k", boost::program_options::value<float>(&c.fracWindow)->default_value(0.5), "min. callable window fraction [0,1]")
+      ("fraction-window,k", boost::program_options::value<float>(&c.fracWindow)->default_value(0.25), "min. callable window fraction [0,1]")
       ;
 
     boost::program_options::options_description gcopt("GC options");

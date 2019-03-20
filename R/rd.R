@@ -13,6 +13,8 @@ x$chr = factor(x$chr, levels=chrs)
 seg = read.table(args[2], header=T)
 seg = seg[seg$chr %in% chrs,]
 seg$chr = factor(seg$chr, levels=chrs)
+plotBaf = T
+if (mean(is.na(x[,6])) > 0.5) { plotBaf = F; }
 
 p = ggplot(data=x, aes(x=start, y=x[,5]))
 p = p + geom_point(pch=21, size=0.5)
@@ -23,19 +25,23 @@ p = p + scale_x_continuous(labels=comma)
 p = p + facet_grid(. ~ chr, scales="free_x", space="free_x")
 p = p + ylim(0,8)
 p = p + theme(axis.text.x = element_text(angle=45, hjust=1))
-q = ggplot(data=x, aes(x=start, y=x[,6]))
-q = q + geom_point(pch=21, size=0.5)
-q = q + ylab("Obs / Exp MAF of het. SNPs") + xlab("Chromosome")
-q = q + geom_segment(data = seg, aes(x=start, xend=end, y=maf, yend=maf), color="lightblue")
-q = q + scale_x_continuous(labels=comma)
-q = q + facet_grid(. ~ chr, scales="free_x", space="free_x")
-q = q + ylim(0,1.5)
-q = q + theme(axis.text.x = element_text(angle=45, hjust=1))
-g1 = ggplotGrob(p)
-g2 = ggplotGrob(q)
-g = rbind(g1, g2, size="first")
-g$widths = unit.pmax(g1$widths, g2$widths)
-ggsave(g, file="plot.wholegenome.png", width=24, height=6)
+if (plotBaf) {
+ q = ggplot(data=x, aes(x=start, y=x[,6]))
+ q = q + geom_point(pch=21, size=0.5)
+ q = q + ylab("Obs / Exp MAF of het. SNPs") + xlab("Chromosome")
+ q = q + geom_segment(data = seg, aes(x=start, xend=end, y=maf, yend=maf), color="lightblue")
+ q = q + scale_x_continuous(labels=comma)
+ q = q + facet_grid(. ~ chr, scales="free_x", space="free_x")
+ q = q + ylim(0,1.5)
+ q = q + theme(axis.text.x = element_text(angle=45, hjust=1))
+ g1 = ggplotGrob(p)
+ g2 = ggplotGrob(q)
+ g = rbind(g1, g2, size="first")
+ g$widths = unit.pmax(g1$widths, g2$widths)
+ ggsave(g, file="plot.wholegenome.png", width=24, height=6)
+} else {
+ ggsave(p, file="plot.wholegenome.png", width=24, height=6)
+}
 print(warnings())
 
 for(chrname in unique(x$chr)) {
@@ -53,17 +59,21 @@ for(chrname in unique(x$chr)) {
  #print(sd(sub[,6], na.rm=T))
  #print(mean(sub[,6], na.rm=T))
  #print(mean(is.na(sub[,6])))
- q = q + geom_point(pch=21, size=0.5)
- q = q + ylab("Obs / Exp MAF of het. SNPs") + xlab(chrname)
- q = q + geom_segment(data = local, aes(x=start, xend=end, y=maf, yend=maf), color="lightblue")
- q = q + scale_x_continuous(labels=comma, breaks = scales::pretty_breaks(n=20))
- q = q + theme(axis.text.x = element_text(angle=45, hjust=1))
- q = q + ylim(0,1.5)
- g1 = ggplotGrob(p)
- g2 = ggplotGrob(q)
- g = rbind(g1, g2, size="first")
- g$widths = unit.pmax(g1$widths, g2$widths)
- ggsave(g, file=paste0("plot.", chrname, ".png"), width=24, height=6)
+ if (plotBaf) {
+  q = q + geom_point(pch=21, size=0.5)
+  q = q + ylab("Obs / Exp MAF of het. SNPs") + xlab(chrname)
+  q = q + geom_segment(data = local, aes(x=start, xend=end, y=maf, yend=maf), color="lightblue")
+  q = q + scale_x_continuous(labels=comma, breaks = scales::pretty_breaks(n=20))
+  q = q + theme(axis.text.x = element_text(angle=45, hjust=1))
+  q = q + ylim(0,1.5)
+  g1 = ggplotGrob(p)
+  g2 = ggplotGrob(q)
+  g = rbind(g1, g2, size="first")
+  g$widths = unit.pmax(g1$widths, g2$widths)
+  ggsave(g, file=paste0("plot.", chrname, ".png"), width=24, height=6)
+ } else {
+  ggsave(p, file=paste0("plot.", chrname, ".png"), width=24, height=6)
+ }
  print(warnings())
 }
- 
+
