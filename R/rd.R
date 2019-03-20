@@ -14,9 +14,9 @@ seg = read.table(args[2], header=T)
 seg = seg[seg$chr %in% chrs,]
 seg$chr = factor(seg$chr, levels=chrs)
 plotBaf = T
-if (mean(is.na(x[,6])) > 0.5) { plotBaf = F; }
+if (mean(is.na(x[,7])) > 0.5) { plotBaf = F; }
 
-p = ggplot(data=x, aes(x=start, y=x[,5]))
+p = ggplot(data=x, aes(x=start, y=x[,6]))
 p = p + geom_point(pch=21, size=0.5)
 p = p + geom_segment(data = seg, aes(x=start, xend=end, y=cn, yend=cn), color="lightblue")
 p = p + xlab("Chromosome")
@@ -26,7 +26,7 @@ p = p + facet_grid(. ~ chr, scales="free_x", space="free_x")
 p = p + ylim(0,8)
 p = p + theme(axis.text.x = element_text(angle=45, hjust=1))
 if (plotBaf) {
- q = ggplot(data=x, aes(x=start, y=x[,6]))
+ q = ggplot(data=x, aes(x=start, y=x[,7]))
  q = q + geom_point(pch=21, size=0.5)
  q = q + ylab("Obs / Exp MAF of het. SNPs") + xlab("Chromosome")
  q = q + geom_segment(data = seg, aes(x=start, xend=end, y=maf, yend=maf), color="lightblue")
@@ -48,17 +48,17 @@ for(chrname in unique(x$chr)) {
  print(chrname)
  sub = x[x$chr == chrname,]
  local = seg[seg$chr == chrname,]
- p = ggplot(data=sub, aes(x=start, y=sub[,5]))
+ p = ggplot(data=sub, aes(x=start, y=sub[,6]))
  p = p + geom_point(pch=21, size=0.5)
  p = p + geom_segment(data = local, aes(x=start, xend=end, y=cn, yend=cn), color="lightblue")
  p = p + ylab("Copy-number") + xlab(chrname)
  p = p + scale_x_continuous(labels=comma, breaks = scales::pretty_breaks(n=20))
  p = p + ylim(0,8)
  p = p + theme(axis.text.x = element_text(angle=45, hjust=1))
- q = ggplot(data=sub, aes(x=start, y=sub[,6]))
- #print(sd(sub[,6], na.rm=T))
- #print(mean(sub[,6], na.rm=T))
- #print(mean(is.na(sub[,6])))
+ q = ggplot(data=sub, aes(x=start, y=sub[,7]))
+ #print(sd(sub[,7], na.rm=T))
+ #print(mean(sub[,7], na.rm=T))
+ #print(mean(is.na(sub[,7])))
  if (plotBaf) {
   q = q + geom_point(pch=21, size=0.5)
   q = q + ylab("Obs / Exp MAF of het. SNPs") + xlab(chrname)
