@@ -338,6 +338,7 @@ namespace coralns
 	    cnbc[refIndex].itv[row].first = boost::lexical_cast<uint32_t>(*tokIter++);
 	    if (tokIter!=tokens.end()) {
 	      cnbc[refIndex].itv[row].second = boost::lexical_cast<uint32_t>(*tokIter++);
+	      tokIter++; // Mappable bp
 	      std::string count = *tokIter++;
 	      std::string cn = *tokIter++;
 	      std::string maf = *tokIter;
