@@ -80,6 +80,8 @@ namespace coralns
     boost::filesystem::path scanFile;
   };
 
+
+  
   template<typename TConfig, typename TGenomicVariants>
   inline int32_t
   bamCount(TConfig const& c, LibraryInfo const& li, std::vector<GcBias> const& gcbias, std::pair<uint32_t, uint32_t> const& gcbound, TGenomicVariants const& cvar, TGenomicVariants const& gvar) {
@@ -188,61 +190,110 @@ namespace coralns
       typedef std::vector<TCount> TCoverage;
       TCoverage cov(hdr->target_len[refIndex], 0);
 
-      // Mate map
-      typedef boost::unordered_map<std::size_t, bool> TMateMap;
-      TMateMap mateMap;
+      // Split-read breakpoints
+      std::vector<uint32_t> splitBp;
+      {
+	// Split-read map
+	TCoverage splitCovLeft(hdr->target_len[refIndex], 0);
+	TCoverage splitCovRight(hdr->target_len[refIndex], 0);
       
-      // Count reads
-      hts_itr_t* iter = sam_itr_queryi(idx, refIndex, 0, hdr->target_len[refIndex]);
-      bam1_t* rec = bam_init1();
-      int32_t lastAlignedPos = 0;
-      std::set<std::size_t> lastAlignedPosReads;
-      while (sam_itr_next(samfile, iter, rec) >= 0) {
-	if (rec->core.flag & (BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FSUPPLEMENTARY | BAM_FUNMAP)) continue;
-	if ((rec->core.flag & BAM_FPAIRED) && ((rec->core.flag & BAM_FMUNMAP) || (rec->core.tid != rec->core.mtid))) continue;
-	if (rec->core.qual < c.minQual) continue;
-
-	int32_t midPoint = rec->core.pos + halfAlignmentLength(rec);
-	if (rec->core.flag & BAM_FPAIRED) {
-	  // Clean-up the read store for identical alignment positions
-	  if (rec->core.pos > lastAlignedPos) {
-	    lastAlignedPosReads.clear();
-	    lastAlignedPos = rec->core.pos;
-	  }
+	// Mate map
+	typedef boost::unordered_map<std::size_t, bool> TMateMap;
+	TMateMap mateMap;
 	
-	  if ((rec->core.pos < rec->core.mpos) || ((rec->core.pos == rec->core.mpos) && (lastAlignedPosReads.find(hash_string(bam_get_qname(rec))) == lastAlignedPosReads.end()))) {
-	    // First read
-	    lastAlignedPosReads.insert(hash_string(bam_get_qname(rec)));
-	    std::size_t hv = hash_pair(rec);
-	    mateMap[hv] = true;
-	    continue;
-	  } else {
-	    // Second read
-	    std::size_t hv = hash_pair_mate(rec);
-	    if ((mateMap.find(hv) == mateMap.end()) || (!mateMap[hv])) continue; // Mate discarded
-	    mateMap[hv] = false;
+	// Count reads
+	hts_itr_t* iter = sam_itr_queryi(idx, refIndex, 0, hdr->target_len[refIndex]);
+	bam1_t* rec = bam_init1();
+	int32_t lastAlignedPos = 0;
+	std::set<std::size_t> lastAlignedPosReads;
+	while (sam_itr_next(samfile, iter, rec) >= 0) {
+	  if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP)) continue;
+	  if (rec->core.qual < c.minQual) continue;
+	  
+	  // Get clippings
+	  uint32_t rp = rec->core.pos; // reference pointer
+	  uint32_t sp = 0; // sequence pointer
+	  uint32_t* cigar = bam_get_cigar(rec);
+	  for (std::size_t i = 0; i < rec->core.n_cigar; ++i) {
+	    if ((bam_cigar_op(cigar[i]) == BAM_CMATCH) || (bam_cigar_op(cigar[i]) == BAM_CEQUAL) || (bam_cigar_op(cigar[i]) == BAM_CDIFF)) {
+	      rp += bam_cigar_oplen(cigar[i]);
+	      sp += bam_cigar_oplen(cigar[i]);
+	    } else if (bam_cigar_op(cigar[i]) == BAM_CDEL) {
+	      if (bam_cigar_oplen(cigar[i]) > c.minCnvSize) {
+		if ((rp >= 0) && (rp < hdr->target_len[refIndex]) && (splitCovRight[rp] < maxCoverage - 1)) ++splitCovRight[rp];
+	      }
+	      rp += bam_cigar_oplen(cigar[i]);
+	      if (bam_cigar_oplen(cigar[i]) > c.minCnvSize) {
+		if ((rp >= 0) && (rp < hdr->target_len[refIndex]) && (splitCovLeft[rp] < maxCoverage - 1)) ++splitCovLeft[rp];
+	      }
+	    } else if (bam_cigar_op(cigar[i]) == BAM_CINS) {
+	      sp += bam_cigar_oplen(cigar[i]);
+	    } else if ((bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) || (bam_cigar_op(cigar[i]) == BAM_CHARD_CLIP)) {
+	      bool scleft = false;
+	      if (sp == 0) scleft = true;
+	      sp += bam_cigar_oplen(cigar[i]);
+	      // Min clipping length of 10bp
+	      if (bam_cigar_oplen(cigar[i]) > 10) {
+		if ((rp >= 0) && (rp < hdr->target_len[refIndex])) {
+		  if (scleft) {
+		    if (splitCovLeft[rp] < maxCoverage - 1) ++splitCovLeft[rp];
+		  } else {
+		    if (splitCovRight[rp] < maxCoverage - 1) ++splitCovRight[rp];
+		  }
+		}
+	      }
+	    } else if (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP) {
+	      rp += bam_cigar_oplen(cigar[i]);
+	    } else std::cerr << "Warning: Unknown Cigar operation!" << std::endl;
 	  }
+	  
+	  // Exclude secondary/supplementary alignments
+	  if (rec->core.flag & (BAM_FSECONDARY | BAM_FSUPPLEMENTARY)) continue;
+	  if ((rec->core.flag & BAM_FPAIRED) && ((rec->core.flag & BAM_FMUNMAP) || (rec->core.tid != rec->core.mtid))) continue;
 
-	  // Insert size filter
-	  int32_t isize = (rec->core.pos + alignmentLength(rec)) - rec->core.mpos;
-	  if ((li.minNormalISize < isize) && (isize < li.maxNormalISize)) {
-	    midPoint = rec->core.mpos + (int32_t) (isize/2);
-	  } else {
-	    if (rec->core.flag & BAM_FREVERSE) midPoint = rec->core.pos + alignmentLength(rec) - (c.meanisize / 2);
-	    else midPoint = rec->core.pos + (c.meanisize / 2);
+	  int32_t midPoint = rec->core.pos + halfAlignmentLength(rec);
+	  if (rec->core.flag & BAM_FPAIRED) {
+	    // Clean-up the read store for identical alignment positions
+	    if (rec->core.pos > lastAlignedPos) {
+	      lastAlignedPosReads.clear();
+	      lastAlignedPos = rec->core.pos;
+	    }
+	    
+	    if ((rec->core.pos < rec->core.mpos) || ((rec->core.pos == rec->core.mpos) && (lastAlignedPosReads.find(hash_string(bam_get_qname(rec))) == lastAlignedPosReads.end()))) {
+	      // First read
+	      lastAlignedPosReads.insert(hash_string(bam_get_qname(rec)));
+	      std::size_t hv = hash_pair(rec);
+	      mateMap[hv] = true;
+	      continue;
+	    } else {
+	      // Second read
+	      std::size_t hv = hash_pair_mate(rec);
+	      if ((mateMap.find(hv) == mateMap.end()) || (!mateMap[hv])) continue; // Mate discarded
+	      mateMap[hv] = false;
+	    }
+	    
+	    // Insert size filter
+	    int32_t isize = (rec->core.pos + alignmentLength(rec)) - rec->core.mpos;
+	    if ((li.minNormalISize < isize) && (isize < li.maxNormalISize)) {
+	      midPoint = rec->core.mpos + (int32_t) (isize/2);
+	    } else {
+	      if (rec->core.flag & BAM_FREVERSE) midPoint = rec->core.pos + alignmentLength(rec) - (c.meanisize / 2);
+	      else midPoint = rec->core.pos + (c.meanisize / 2);
+	    }
 	  }
+	  
+	  // Count fragment
+	  if ((midPoint >= 0) && (midPoint < (int32_t) hdr->target_len[refIndex]) && (cov[midPoint] < maxCoverage - 1)) ++cov[midPoint];
 	}
+	// Clean-up
+	if (seq != NULL) free(seq);
+	if (ref != NULL) free(ref);
+	bam_destroy1(rec);
+	hts_itr_destroy(iter);
 
-	// Count fragment
-	if ((midPoint >= 0) && (midPoint < (int32_t) hdr->target_len[refIndex]) && (cov[midPoint] < maxCoverage - 1)) ++cov[midPoint];
+	// Collect split-read breakpoints
+	_collectSplitBp(splitCovLeft, splitCovRight, splitBp, c.minCnvSize);
       }
-      // Clean-up
-      if (seq != NULL) free(seq);
-      if (ref != NULL) free(ref);
-      bam_destroy1(rec);
-      hts_itr_destroy(iter);
-      mateMap.clear();
-
 
       // Output BAF
       for(uint32_t i = 0; i < cvar[refIndex].size(); ++i) {
@@ -259,6 +310,8 @@ namespace coralns
 	}
       }
 
+      // Call CNVs
+      //callCNVs(c, splitBp, gcbound, gcContent, uniqContent, gcbias, cov, cvar, gvar, refIndex);
       
       // BED File (target intervals)
       if (c.hasBedFile) {

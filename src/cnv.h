@@ -48,6 +48,131 @@ Contact: Tobias Rausch (rausch@embl.de)
 namespace coralns
 {
 
+  template<typename TCoverage>
+  inline void
+  _collectSplitBp(TCoverage& splitCovLeft, TCoverage& splitCovRight, std::vector<uint32_t>& splitBp, uint32_t const bandwidth) {
+    typedef typename TCoverage::value_type TValue;
+
+    // Identify peaks
+    TValue defaultMaxVal = 3; // Require at least 3 split-reads
+    TValue maxValLeft = defaultMaxVal;
+    TValue maxValRight = defaultMaxVal;
+    uint32_t maxIdxLeft = 0;
+    uint32_t maxIdxRight = 0;
+
+    // Fwd scan
+    for(uint32_t i = 0; i < splitCovLeft.size(); ++i) {
+      if (i - maxIdxLeft > bandwidth) {
+	maxValLeft = defaultMaxVal;
+	maxIdxLeft = i;
+      }
+      if (i - maxIdxRight > bandwidth) {
+	maxValRight = defaultMaxVal;
+	maxIdxRight = i;
+      }
+      if (splitCovLeft[i] > maxValLeft) {
+	maxValLeft = splitCovLeft[i];
+	maxIdxLeft = i;
+      } else splitCovLeft[i] = 0;
+      if (splitCovRight[i] > maxValRight) {
+	maxValRight = splitCovRight[i];
+	maxIdxRight = i;
+      } else splitCovRight[i] = 0;
+    }
+
+    // Rev scan
+    maxValLeft = defaultMaxVal;
+    maxValRight = defaultMaxVal;
+    maxIdxLeft = splitCovLeft.size();
+    maxIdxRight = splitCovRight.size();
+
+    // Rev scan
+    for(uint32_t i = splitCovLeft.size(); i > 0; --i) {
+      if (maxIdxLeft - i > bandwidth) {
+	maxValLeft = defaultMaxVal;
+	maxIdxLeft = i;
+      }
+      if (maxIdxRight - i > bandwidth) {
+	maxValRight = defaultMaxVal;
+	maxIdxRight = i;
+      }
+      if (splitCovLeft[i-1] > maxValLeft) {
+	maxValLeft = splitCovLeft[i-1];
+	maxIdxLeft = i;
+      } else splitCovLeft[i-1] = 0;
+      if (splitCovRight[i-1] > maxValRight) {
+	maxValRight = splitCovRight[i-1];
+	maxIdxRight = i;
+      } else splitCovRight[i-1] = 0;
+    }
+
+    // Erase breakpoints in close proximity (small deletions or insertions)
+    uint32_t leftSum = 0;
+    uint32_t rightSum = 0;
+    bool erasePeak = false;
+    uint32_t eraseIdx = 0;
+    for(uint32_t i = 0; i < splitCovLeft.size(); ++i) {
+      if (i < bandwidth) {
+	leftSum += splitCovLeft[i];
+	rightSum += splitCovRight[i];
+      } else {
+	if ((leftSum > defaultMaxVal) && (rightSum > defaultMaxVal)) {
+	  erasePeak = true;
+	  eraseIdx = i;
+	}
+	leftSum -= splitCovLeft[i - bandwidth];
+	rightSum -= splitCovRight[i - bandwidth];
+	leftSum += splitCovLeft[i];
+	rightSum += splitCovRight[i];	
+	if (erasePeak) {
+	  splitCovLeft[i - bandwidth] = 0;
+	  splitCovRight[i - bandwidth] = 0;
+	  if (i - eraseIdx > bandwidth) erasePeak = false;
+	}
+      }
+    }
+
+    // Insert breakpoints
+    for(uint32_t i = 0; i < splitCovLeft.size(); ++i) {
+      if ((splitCovLeft[i] > 0) || (splitCovRight[i] > 0)) {
+	splitBp.push_back(i);
+      }
+    }
+  }
+
+
+  template<typename TConfig, typename TGcBias, typename TCoverage, typename TGenomicVariants>
+  inline void
+  callCNVs(TConfig const& c, std::vector<uint32_t> const& splitBp, std::pair<uint32_t, uint32_t> const& gcbound, std::vector<uint16_t> const& gcContent, std::vector<uint16_t> const& uniqContent, TGcBias const& gcbias, TCoverage const& cov, TGenomicVariants const& cvar, TGenomicVariants const& gvar, int32_t const refIndex) {
+    for(uint32_t i = 1; i < splitBp.size(); ++i) {
+      uint32_t bpLeft = splitBp[i-1];
+      uint32_t bpRight = splitBp[i];
+      if ((bpLeft < bpRight) && (bpRight - bpLeft >= c.minCnvSize) && (bpRight <= cov.size())) {
+	double covsum = 0;
+	double expcov = 0;
+	double obsexp = 0;
+	uint32_t winlen = 0;
+	for(uint32_t pos = bpLeft; pos < bpRight; ++pos) {
+	  if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
+	    covsum += cov[pos];
+	    obsexp += gcbias[gcContent[pos]].obsexp;
+	    expcov += gcbias[gcContent[pos]].coverage;
+	    ++winlen;
+	  }
+	}
+	if (winlen >= c.fracWindow * (bpRight - bpLeft)) {
+	  obsexp /= (double) winlen;
+	  double count = ((double) covsum / obsexp ) * (double) (bpRight - bpLeft) / (double) winlen;
+	  double cn = 2 * covsum / expcov;
+	  std::cerr << bpLeft << "\t" << bpRight << "\t" << winlen << "\t" << count << "\t" << cn;
+	  double maf = mafSegment(c, bpLeft, bpRight, cvar[refIndex], gvar[refIndex]);
+	  if (maf != -1) std::cerr << "\t" << maf << std::endl;
+	  else std::cerr << "\tNA" << std::endl;
+	}
+      }
+    }
+  }
+  
   /*
   	// Find #mappable pos
 	uint32_t mappable = 0;
