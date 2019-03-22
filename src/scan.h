@@ -102,12 +102,13 @@ namespace coralns
     boost::progress_display show_progress( hdr->n_targets );
 
     // Iterate chromosomes
+    uint64_t totalCov = 0;
     faidx_t* faiMap = fai_load(c.mapFile.string().c_str());
     for(int32_t refIndex=0; refIndex < (int32_t) hdr->n_targets; ++refIndex) {
       ++show_progress;
       if (chrNoData(c, refIndex, idx)) continue;
       // Exclude small chromosomes
-      if (hdr->target_len[refIndex] < c.minChrLen) continue;
+      if ((hdr->target_len[refIndex] < c.minChrLen) && (totalCov > 1000000)) continue;
       // Exclude sex chromosomes
       if ((std::string(hdr->target_name[refIndex]) == "chrX") || (std::string(hdr->target_name[refIndex]) == "chrY") || (std::string(hdr->target_name[refIndex]) == "X") || (std::string(hdr->target_name[refIndex]) == "Y")) continue;
 
@@ -210,7 +211,9 @@ namespace coralns
 	  int32_t bin = _findScanWindow(c, hdr->target_len[refIndex], binMap, midPoint);
 	  if (bin >= 0) {
 	    ++scanCounts[refIndex][bin].cov;
+	    
 	    if (uniqContent[midPoint] >= c.fragmentUnique * c.meanisize) ++scanCounts[refIndex][bin].uniqcov;
+	    ++totalCov;
 	  }
 	}
       }
@@ -219,7 +222,7 @@ namespace coralns
       hts_itr_destroy(iter);
       if (seq != NULL) free(seq);
     }
-	  
+    
     // clean-up
     fai_destroy(faiMap);
     bam_hdr_destroy(hdr);

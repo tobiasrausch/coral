@@ -311,7 +311,7 @@ namespace coralns
       }
 
       // Call CNVs
-      //callCNVs(c, splitBp, gcbound, gcContent, uniqContent, gcbias, cov, cvar, gvar, refIndex);
+      //callCNVs(c, splitBp, gcbound, gcContent, uniqContent, gcbias, cov, cvar, gvar, hdr, refIndex);
       
       // BED File (target intervals)
       if (c.hasBedFile) {
@@ -657,18 +657,23 @@ namespace coralns
       faidx_t* faiRef = fai_load(c.genome.string().c_str());
       faidx_t* faiMap = fai_load(c.mapFile.string().c_str());
       uint32_t mapFound = 0;
+      uint32_t refFound = 0;
       for(int32_t refIndex=0; refIndex < hdr->n_targets; ++refIndex) {
 	std::string tname(hdr->target_name[refIndex]);
-	if (!faidx_has_seq(faiRef, tname.c_str())) {
-	  std::cerr << "BAM file chromosome " << hdr->target_name[refIndex] << " is NOT present in your reference file " << c.genome.string() << std::endl;
-	  return 1;
-	}
 	if (faidx_has_seq(faiMap, tname.c_str())) ++mapFound;
+	if (faidx_has_seq(faiRef, tname.c_str())) ++refFound;
+	else {
+	  std::cerr << "Warning: BAM chromosome " << tname << " not present in reference genome!" << std::endl;
+	}
       }
       fai_destroy(faiRef);
       fai_destroy(faiMap);
       if (!mapFound) {
 	std::cerr << "Mappability map chromosome naming disagrees with BAM file!" << std::endl;
+	return 1;
+      }
+      if (!refFound) {
+	std::cerr << "Reference genome chromosome naming disagrees with BAM file!" << std::endl;
 	return 1;
       }
       

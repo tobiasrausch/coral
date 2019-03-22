@@ -140,7 +140,7 @@ namespace coralns
     }
   }
 
-
+  /*
   template<typename TConfig, typename TGcBias, typename TCoverage, typename TGenomicVariants>
   inline void
   callCNVs(TConfig const& c, std::vector<uint32_t> const& splitBp, std::pair<uint32_t, uint32_t> const& gcbound, std::vector<uint16_t> const& gcContent, std::vector<uint16_t> const& uniqContent, TGcBias const& gcbias, TCoverage const& cov, TGenomicVariants const& cvar, TGenomicVariants const& gvar, int32_t const refIndex) {
@@ -172,96 +172,112 @@ namespace coralns
       }
     }
   }
-  
-  /*
-  	// Find #mappable pos
-	uint32_t mappable = 0;
-	for(uint32_t pos = 0; pos < hdr->target_len[refIndex]; ++pos) {
-	  if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
-	    ++mappable;
-	  }
-	}
-	typedef std::vector<TCount> TCoverage;
-	TCoverage mapcov(mappable, 0);
-	std::vector<uint16_t> mapGcContent(mappable, 0);
-	{
-	  uint32_t mapIdx = 0;
-	  for(uint32_t pos = 0; pos < hdr->target_len[refIndex]; ++pos) {
-	    if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
-	      mapcov[mapIdx] = cov[pos];
-	      mapGcContent[mapIdx] = gcContent[pos];
-	      ++mapIdx;
-	    }
-	  }
-	}
+  */
 
-	// Find breakpoints
-	typedef boost::dynamic_bitset<> TBitSet;
-	TBitSet bp(mappable, false);
+  template<typename TConfig, typename TGcBias, typename TCoverage, typename TGenomicVariants>
+  inline void
+  callCNVs(TConfig const& c, std::vector<uint32_t> const& splitBp, std::pair<uint32_t, uint32_t> const& gcbound, std::vector<uint16_t> const& gcContent, std::vector<uint16_t> const& uniqContent, TGcBias const& gcbias, TCoverage const& cov, TGenomicVariants const& cvar, TGenomicVariants const& gvar, bam_hdr_t const* hdr, int32_t const refIndex) {
+    // Shrink to mappable pos
+    uint32_t mappable = 0;
+    for(uint32_t pos = 0; pos < hdr->target_len[refIndex]; ++pos) {
+      if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) ++mappable;
+    }
+    TCoverage mapcov(mappable, 0);
+    std::vector<uint16_t> mapGcContent(mappable, 0);
+    uint32_t mapIdx = 0;
+    for(uint32_t pos = 0; pos < hdr->target_len[refIndex]; ++pos) {
+      if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
+	mapcov[mapIdx] = cov[pos];
+	mapGcContent[mapIdx] = gcContent[pos];
+	++mapIdx;
+      }
+    }
 
-	// Iterate a couple CNV sizes to find breakpoint regions
-	uint32_t boundarySize = 10000;
-	for(uint32_t cnvSize = c.minCnvSize; cnvSize <= 1000000; cnvSize = (uint32_t) (cnvSize * 1.3)) {
-	  double covsumLeft = 0;
-	  double expcovLeft = 0;
-	  double covsumMiddle = 0;
-	  double expcovMiddle = 0;
-	  double covsumRight = 0;
-	  double expcovRight = 0;
-	  for(int32_t pos = boundarySize; pos < (int32_t) mappable - boundarySize - cnvSize; ++pos) {
-	    if (pos == boundarySize) {
-	      for(int32_t i = 0; i<boundarySize; ++i) {
-		covsumLeft += mapcov[i];
-		expcovLeft += gcbias[mapGcContent[i]].coverage;
-	      }
-	      for(int32_t i = boundarySize; i < boundarySize + cnvSize; ++i) {
-		covsumMiddle += mapcov[i];
-		expcovMiddle += gcbias[mapGcContent[i]].coverage;
-	      }
-	      for(int32_t i = boundarySize + cnvSize; i < boundarySize + cnvSize + boundarySize; ++i) {
-		covsumRight += mapcov[i];
-		expcovRight += gcbias[mapGcContent[i]].coverage;
-	      }
-	    } else {
-	      covsumLeft -= mapcov[pos - boundarySize - 1];
-	      expcovLeft -= gcbias[mapGcContent[pos - boundarySize - 1]].coverage;
-	      covsumMiddle -= mapcov[pos - 1];
-	      expcovMiddle -= gcbias[mapGcContent[pos - 1]].coverage;
-	      covsumRight -= mapcov[pos + cnvSize - 1];
-	      expcovRight -= gcbias[mapGcContent[pos + cnvSize - 1]].coverage;
-	      covsumLeft += mapcov[pos];
-	      expcovLeft += gcbias[mapGcContent[pos]].coverage;
-	      covsumMiddle += mapcov[pos + cnvSize];
-	      expcovMiddle += gcbias[mapGcContent[pos + cnvSize]].coverage;
-	      covsumRight += mapcov[pos + cnvSize + boundarySize];
-	      expcovRight += gcbias[mapGcContent[pos + cnvSize + boundarySize]].coverage;
-	    }
-	    double cnLeft = 2 * covsumLeft / expcovLeft;
-	    double cnMiddle = 2 * covsumMiddle / expcovMiddle;
-	    double cnRight = 2 * covsumRight / expcovRight;
-	    if ((std::abs(cnLeft - cnRight) < 0.2) && (std::abs(cnLeft - cnMiddle) > 0.8) && (std::abs(cnRight - cnMiddle) > 0.8) && ((cnMiddle < 1.5) || (cnMiddle > 2.5))) {
-	      bp[pos + cnvSize / 2] = true;
-	    }
+    // Find breakpoints
+    typedef boost::dynamic_bitset<> TBitSet;
+    TBitSet bp(mappable, false);
+
+    // Iterate a couple CNV sizes to find breakpoint regions
+    uint32_t boundarySize = 10000;
+    for(uint32_t cnvSize = c.minCnvSize; cnvSize <= 1000000; cnvSize = (uint32_t) (cnvSize * 1.3)) {
+      double covsumLeft = 0;
+      double expcovLeft = 0;
+      double covsumMiddle = 0;
+      double expcovMiddle = 0;
+      double covsumRight = 0;
+      double expcovRight = 0;
+      for(int32_t pos = boundarySize; pos < (int32_t) mappable - boundarySize - cnvSize; ++pos) {
+	if (pos == boundarySize) {
+	  for(int32_t i = 0; i<boundarySize; ++i) {
+	    covsumLeft += mapcov[i];
+	    expcovLeft += gcbias[mapGcContent[i]].coverage;
 	  }
+	  for(int32_t i = boundarySize; i < boundarySize + cnvSize; ++i) {
+	    covsumMiddle += mapcov[i];
+	    expcovMiddle += gcbias[mapGcContent[i]].coverage;
+	  }
+	  for(int32_t i = boundarySize + cnvSize; i < boundarySize + cnvSize + boundarySize; ++i) {
+	    covsumRight += mapcov[i];
+	    expcovRight += gcbias[mapGcContent[i]].coverage;
+	  }
+	} else {
+	  covsumLeft -= mapcov[pos - boundarySize - 1];
+	  expcovLeft -= gcbias[mapGcContent[pos - boundarySize - 1]].coverage;
+	  covsumMiddle -= mapcov[pos - 1];
+	  expcovMiddle -= gcbias[mapGcContent[pos - 1]].coverage;
+	  covsumRight -= mapcov[pos + cnvSize - 1];
+	  expcovRight -= gcbias[mapGcContent[pos + cnvSize - 1]].coverage;
+	  covsumLeft += mapcov[pos];
+	  expcovLeft += gcbias[mapGcContent[pos]].coverage;
+	  covsumMiddle += mapcov[pos + cnvSize];
+	  expcovMiddle += gcbias[mapGcContent[pos + cnvSize]].coverage;
+	  covsumRight += mapcov[pos + cnvSize + boundarySize];
+	  expcovRight += gcbias[mapGcContent[pos + cnvSize + boundarySize]].coverage;
 	}
+	double cnLeft = 2 * covsumLeft / expcovLeft;
+	double cnMiddle = 2 * covsumMiddle / expcovMiddle;
+	double cnRight = 2 * covsumRight / expcovRight;
+	std::cerr << cnLeft << "\t" << cnMiddle << "\t" << cnRight << std::endl;
+	if ((std::abs(cnLeft - cnRight) < 0.2) && (std::abs(cnLeft - cnMiddle) > 0.8) && (std::abs(cnRight - cnMiddle) > 0.8) && ((cnMiddle < 1.5) || (cnMiddle > 2.5))) {
+	  bp[pos + cnvSize / 2] = true;
+	}
+      }
+      exit(-1);
+    
+      // Get start and end of CNVs
+      typedef std::pair<uint32_t, uint32_t> TSVInterval;
+      std::vector<TSVInterval> svIntervals;
+      int32_t svStart = -1;
+      int32_t svEnd = -1;
+      for(uint32_t i = 0; i < mappable; ++i) {
+	if (bp[i]) {
+	  if (svStart != -1) svEnd = i;
+	  else {
+	    svStart = i;
+	    svEnd = i;
+	  }
+	} else {
+	  if ((svStart > -1) && (svStart < svEnd)) svIntervals.push_back(std::make_pair(svStart, svEnd));
+	  svStart = -1;
+	  svEnd = -1;
+	}
+      }
 
-	// Get start and end of CNVs
-	int32_t svStart = -1;
-	int32_t svEnd = -1;
-	for(uint32_t i = 0; i < mappable; ++i) {
-	  if (bp[i]) {
-	    if (svStart != -1) svEnd = i;
-	    else {
-	      svStart = i;
-	      svEnd = i;
-	    }
-	  } else {
-	    if (svStart != -1) {
-	      if ((svStart < svEnd) && (svEnd - svStart > 50)) {
-		// Start from core region
-		int32_t offset = (int32_t) (0.2 * (svEnd - svStart));
-		svStart += offset;
-		svEnd -= offset;
+
+      // Output CNVs
+      for(uint32_t i = 0; i < svIntervals.size(); ++i) {
+	std::cerr << cnvSize << "\t" << svIntervals[i].first << "\t" << svIntervals[i].second << std::endl;
+      }
+    }
+  }
+    
+    
+	/*
+	  	  if ((svStart < svEnd) && (svEnd - svStart > 50)) {
+	    // Start from core region
+	    int32_t offset = (int32_t) (0.2 * (svEnd - svStart));
+	    svStart += offset;
+	    svEnd -= offset;
 		if (svStart < svEnd) {
 		  double covsum = 0;
 		  double expcov = 0;
@@ -328,8 +344,7 @@ namespace coralns
 	      svEnd = -1;
 	    }
 	  }
-	}
-  */
+    */
 
 }
 
