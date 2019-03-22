@@ -193,6 +193,49 @@ namespace coralns
       }
     }
 
+    // Iterate a couple CNV sizes to find breakpoint regions
+    std::vector<uint32_t> totaldiff(mappable, 0);
+    for(uint32_t cnvSize = c.minCnvSize; cnvSize <= 100000; cnvSize = (uint32_t) (cnvSize * 1.3)) {
+      double covsumLeft = 0;
+      double expcovLeft = 0;
+      double covsumMiddle = 0;
+      double expcovMiddle = 0;
+      double covsumRight = 0;
+      double expcovRight = 0;
+      std::vector<uint32_t> absdiff(mappable, 0);
+      uint64_t avgDiff = 0;
+      for(int32_t pos = 0; pos < (int32_t) mappable - cnvSize; ++pos) {
+	if (pos < cnvSize) {
+	  covsumLeft += mapcov[pos];
+	  expcovLeft += gcbias[mapGcContent[pos]].coverage;
+	  covsumRight += mapcov[pos + cnvSize];
+	  expcovRight += gcbias[mapGcContent[pos + cnvSize]].coverage;
+	} else {
+	  covsumLeft -= mapcov[pos - cnvSize];
+	  expcovLeft -= gcbias[mapGcContent[pos - cnvSize]].coverage;
+	  covsumRight -= mapcov[pos];
+	  expcovRight -= gcbias[mapGcContent[pos]].coverage;
+	  covsumLeft += mapcov[pos];
+	  expcovLeft += gcbias[mapGcContent[pos]].coverage;
+	  covsumRight += mapcov[pos + cnvSize];
+	  expcovRight += gcbias[mapGcContent[pos + cnvSize]].coverage;
+	  absdiff[pos] = std::abs(covsumLeft - covsumRight);
+	  avgDiff += absdiff[pos];
+	}
+      }
+      avgDiff /= (mappable - 2 * cnvSize);
+      uint32_t cutoff = 5 * avgDiff;  // 5-fold enrichment
+      for(int32_t pos = 0; pos < mappable; ++pos) {
+	if (absdiff[pos] > cutoff) totaldiff[pos] += absdiff[pos] / cutoff;
+      }
+    }
+
+    for(int32_t pos = 14583589; pos < 14657512; ++pos) {
+      std::cerr << pos << '\t' << totaldiff[pos] << std::endl;
+    }
+  }
+
+    /*
     // Find breakpoints
     typedef boost::dynamic_bitset<> TBitSet;
     TBitSet bp(mappable, false);
@@ -270,7 +313,7 @@ namespace coralns
       }
     }
   }
-    
+    */    
     
 	/*
 	  	  if ((svStart < svEnd) && (svEnd - svStart > 50)) {
