@@ -309,7 +309,7 @@ namespace coralns
 	  dataOutBaf << std::string(hdr->target_name[refIndex]) << "\t" << cvar[refIndex][i].pos << "\t" << baf_control << "\t" << baf_target << std::endl;
 	}
       }
-
+    
       // Call CNVs
       //callCNVs(c, splitBp, gcbound, gcContent, uniqContent, gcbias, cov, cvar, gvar, hdr, refIndex);
       
@@ -317,24 +317,29 @@ namespace coralns
       if (c.hasBedFile) {
 	// Adaptive Window Length
 	{
+	  // Merge overlapping BED entries
+	  TChrIntervals citv;
+	  _mergeOverlappingBedEntries(bedRegions[refIndex], citv);
+
+	  // Tile merged intervals
 	  double covsum = 0;
 	  double expcov = 0;
 	  double obsexp = 0;
 	  uint32_t winlen = 0;
 	  uint32_t start = 0;
 	  bool endOfWindow = true;
-	  typename TChrIntervals::iterator it = bedRegions[refIndex].begin();
-	  if (it != bedRegions[refIndex].end()) start = it->first;
+	  typename TChrIntervals::iterator it = citv.begin();
+	  if (it != citv.end()) start = it->first;
 	  while(endOfWindow) {
 	    endOfWindow = false;
-	    for(it = bedRegions[refIndex].begin(); ((it != bedRegions[refIndex].end()) && (!endOfWindow)); ++it) {
+	    for(it = citv.begin(); ((it != citv.end()) && (!endOfWindow)); ++it) {
 	      if ((it->first < it->second) && (it->second <= hdr->target_len[refIndex])) {
 		if (start >= it->second) {
 		  if (start == it->second) {
 		    // Special case
 		    typename TChrIntervals::iterator itNext = it;
 		    ++itNext;
-		    if (itNext != bedRegions[refIndex].end()) start = itNext->first;
+		    if (itNext != citv.end()) start = itNext->first;
 		  }
 		  continue;
 		}
@@ -364,7 +369,7 @@ namespace coralns
 			endOfWindow = true;
 		      } else {
 			// Rewind
-			for(typename TChrIntervals::iterator sit = bedRegions[refIndex].begin(); ((sit != bedRegions[refIndex].end()) && (!endOfWindow)); ++sit) {
+			for(typename TChrIntervals::iterator sit = citv.begin(); ((sit != citv.end()) && (!endOfWindow)); ++sit) {
 			  if ((sit->first < sit->second) && (sit->second <= hdr->target_len[refIndex])) {
 			    if (start >= sit->second) continue;
 			    for(uint32_t k = sit->first; ((k < sit->second) && (!endOfWindow)); ++k) {

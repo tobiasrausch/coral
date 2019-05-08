@@ -125,6 +125,19 @@ namespace coralns
   }
 
 
+  template<typename TChrIntervals>
+  inline void
+  _mergeOverlappingBedEntries(TChrIntervals const& bedRegions, TChrIntervals& citv) {
+    typedef boost::icl::interval_set<uint32_t> TUniqueIntervals;
+    typedef typename TUniqueIntervals::interval_type TIVal;
+    TUniqueIntervals uitv;
+
+    // Insert intervals
+    for(typename TChrIntervals::const_iterator it = bedRegions.begin(); it != bedRegions.end(); ++it) uitv.insert(TIVal::right_open(it->first, it->second));
+    
+    // Fetch unique intervals
+    for(typename TUniqueIntervals::iterator it = uitv.begin(); it != uitv.end(); ++it) citv.insert(std::make_pair(it->lower(), it->upper()));
+  }
 }
 
 #endif
