@@ -64,6 +64,7 @@ namespace coralns
     uint16_t mad;
     uint16_t minCoverage;
     uint16_t minSnps;
+    uint16_t ploidy;
     float exclgc;
     float uniqueToTotalCovRatio;
     float fracWindow;
@@ -353,7 +354,7 @@ namespace coralns
 		    if (winlen == c.window_size) {
 		      obsexp /= (double) winlen;
 		      double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
-		      double cn = 2 * covsum / expcov;
+		      double cn = c.ploidy * covsum / expcov;
 		      dataOutAdapt << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << winlen << "\t" << count << "\t" << cn;
 		      double maf = mafSegment(c, start, pos + 1, cvar[refIndex], gvar[refIndex]);
 		      if (maf != -1) dataOutAdapt << "\t" << maf << std::endl;
@@ -412,7 +413,7 @@ namespace coralns
 	      if (winlen >= c.fracWindow * (it->second - it->first)) {
 		obsexp /= (double) winlen;
 		double count = ((double) covsum / obsexp ) * (double) (it->second - it->first) / (double) winlen;
-		double cn = 2 * covsum / expcov;
+		double cn = c.ploidy * covsum / expcov;
 		dataOutFixed << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\t" << winlen << "\t" << count << "\t" << cn;
 		double maf = mafSegment(c, it->first, it->second, cvar[refIndex], gvar[refIndex]);
 		if (maf != -1) dataOutFixed << "\t" << maf << std::endl;
@@ -441,7 +442,7 @@ namespace coralns
 	      if (winlen == c.window_size) {
 		obsexp /= (double) winlen;
 		double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
-		double cn = 2 * covsum / expcov;
+		double cn = c.ploidy * covsum / expcov;
 		dataOutAdapt << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << winlen << "\t" << count << "\t" << cn;
 		double maf = mafSegment(c, start, pos + 1, cvar[refIndex], gvar[refIndex]);
 		if (maf != -1) dataOutAdapt << "\t" << maf << std::endl;
@@ -492,7 +493,7 @@ namespace coralns
 	      if (winlen >= c.fracWindow * c.window_size) {
 		obsexp /= (double) winlen;
 		double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
-		double cn = 2 * covsum / expcov;
+		double cn = c.ploidy * covsum / expcov;
 		dataOutFixed << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (start + c.window_size) << "\t" << winlen << "\t" << count << "\t" << cn;
 		double maf = mafSegment(c, start, start + c.window_size, cvar[refIndex], gvar[refIndex]);
 		if (maf != -1) dataOutFixed << "\t" << maf << std::endl;
@@ -532,6 +533,7 @@ namespace coralns
       ("quality,q", boost::program_options::value<uint16_t>(&c.minQual)->default_value(10), "min. mapping quality")
       ("mappability,m", boost::program_options::value<boost::filesystem::path>(&c.mapFile), "input mappability map")
       ("minsize,z", boost::program_options::value<uint32_t>(&c.minCnvSize)->default_value(250), "min. CNV size")
+      ("ploidy,y", boost::program_options::value<uint16_t>(&c.ploidy)->default_value(2), "baseline ploidy")
       ("fragment,e", boost::program_options::value<float>(&c.fragmentUnique)->default_value(0.97), "min. fragment uniqueness [0,1]")
       ("outprefix,o", boost::program_options::value<std::string>(&c.outprefix)->default_value("outprefix"), "output file prefix")
       ;
@@ -732,22 +734,14 @@ namespace coralns
     }
     
     // GC bias estimation
+    typedef std::pair<uint32_t, uint32_t> TGCBound;
+    TGCBound gcbound;
     std::vector<GcBias> gcbias(c.meanisize + 1, GcBias());
-    gcBias(c, scanCounts, li, gcbias);
+    gcBias(c, scanCounts, li, gcbias, gcbound);
     if (c.hasStatsFile) {
       statsOut << "GC\tgcsum\tsample\treference\tpercentileSample\tpercentileReference\tfractionSample\tfractionReference\tobsexp\tmeancoverage" << std::endl;
       for(uint32_t i = 0; i < gcbias.size(); ++i) statsOut << "GC\t" << i << "\t" << gcbias[i].sample << "\t" << gcbias[i].reference << "\t" << gcbias[i].percentileSample << "\t" << gcbias[i].percentileReference << "\t" << gcbias[i].fractionSample << "\t" << gcbias[i].fractionReference << "\t" << gcbias[i].obsexp << "\t" << gcbias[i].coverage << std::endl;
-    }
-
-    // Correctable GC range
-    typedef std::pair<uint32_t, uint32_t> TGCBound;
-    TGCBound gcbound = gcBound(c, gcbias);
-    if (c.hasStatsFile) {
       statsOut << "BoundsGC\t" << gcbound.first << "," << gcbound.second << std::endl;
-    }
-
-    // Close stats file
-    if (c.hasStatsFile) {
       statsOut.pop();
     }
     

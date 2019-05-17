@@ -194,7 +194,7 @@ namespace coralns
     }
 
     // Iterate a couple CNV sizes to find breakpoint regions
-    std::vector<uint32_t> totaldiff(mappable, 0);
+    std::vector<float> totaldiff(mappable, 0);
     for(uint32_t cnvSize = c.minCnvSize; cnvSize <= 100000; cnvSize = (uint32_t) (cnvSize * 1.3)) {
       double covsumLeft = 0;
       double expcovLeft = 0;
@@ -223,18 +223,57 @@ namespace coralns
 	  avgDiff += absdiff[pos];
 	}
       }
-      avgDiff /= (mappable - 2 * cnvSize);
-      uint32_t cutoff = 5 * avgDiff;  // 5-fold enrichment
+      uint32_t cutoff = 5 * (avgDiff / (mappable - 2 * cnvSize));  // 5-fold enrichment
       for(int32_t pos = 0; pos < mappable; ++pos) {
-	if (absdiff[pos] > cutoff) totaldiff[pos] += absdiff[pos] / cutoff;
+	if (absdiff[pos] > cutoff) totaldiff[pos] += (float) absdiff[pos] / (float) cutoff;
+      }
+    }
+  
+    // Find peak boundaries
+    std::vector<uint32_t> peakMetrics;
+    uint32_t halfSize = c.minCnvSize / 2;
+    bool inPeak = false;
+    uint32_t startPos = 0;
+    uint32_t peakMax = 0;
+    uint32_t peakIdx = 0;
+    for(uint32_t i = 1; i < totaldiff.size(); ++i) {
+      if (!inPeak) {
+	if (totaldiff[i] <= 0) startPos = i;
+	else {
+	  inPeak = true;
+	  peakMax = totaldiff[i];
+	  peakIdx = i;
+	}
+      } else {
+	if (totaldiff[i] <= 0) {
+	  inPeak = false;
+	  peakMetrics.push_back(startPos);
+	  peakMetrics.push_back(peakIdx);
+	  peakMetrics.push_back(i);
+	  startPos = i;
+	} else {
+	  if (totaldiff[i] > peakMax) {
+	    peakMax = totaldiff[i];
+	    peakIdx = i;
+	  }
+	}
       }
     }
 
-    for(int32_t pos = 14583589; pos < 14657512; ++pos) {
-      std::cerr << pos << '\t' << totaldiff[pos] << std::endl;
+    // Translate back from mappable space to genomic space
+    uint32_t pointer = 0;
+    mapIdx = 0;
+    for(uint32_t pos = 0; pos < hdr->target_len[refIndex]; ++pos) {
+      if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
+	while ((pointer < peakMetrics.size()) && (peakMetrics[pointer] == mapIdx)) {
+	  std::cerr << "Peak\t" << pos << '\t' << totaldiff[mapIdx] << std::endl;
+	  ++pointer;
+	}
+	++mapIdx;
+      }
     }
   }
-
+  
     /*
     // Find breakpoints
     typedef boost::dynamic_bitset<> TBitSet;

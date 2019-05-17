@@ -138,9 +138,9 @@ namespace coralns
 
 
   
-  template<typename TConfig>
+  template<typename TConfig, typename TGCBound>
   inline void
-  gcBias(TConfig const& c, std::vector< std::vector<ScanWindow> > const& scanCounts, LibraryInfo const& li, std::vector<GcBias>& gcbias) {
+  gcBias(TConfig const& c, std::vector< std::vector<ScanWindow> > const& scanCounts, LibraryInfo const& li, std::vector<GcBias>& gcbias, TGCBound& gcbound) {
     // Load bam file
     samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
@@ -319,7 +319,38 @@ namespace coralns
       gcbias[i].obsexp = 1;
       if (gcbias[i].fractionReference > 0) gcbias[i].obsexp = gcbias[i].fractionSample / gcbias[i].fractionReference;
     }
-      
+
+    // Estimate correctable GC range
+    gcbound = gcBound(c, gcbias);
+
+    // Adjust correction to the callable range
+    totalSampleCount = 0;
+    totalReferenceCount = 0;
+    for(uint32_t i = gcbound.first + 1; i < gcbound.second; ++i) {
+      totalSampleCount += gcbias[i].sample;
+      totalReferenceCount += gcbias[i].reference;
+    }
+    cumSample = 0;
+    cumReference = 0;
+    // Re-initialize
+    for(uint32_t i = 0; i < gcbias.size(); ++i) {
+      gcbias[i].fractionSample = 0;
+      gcbias[i].fractionReference = 0;
+      gcbias[i].percentileSample = 0;
+      gcbias[i].percentileReference = 0;
+      gcbias[i].obsexp = 1;
+    }
+    for(uint32_t i = gcbound.first + 1; i < gcbound.second; ++i) {
+      cumSample += gcbias[i].sample;
+      cumReference += gcbias[i].reference;
+      gcbias[i].fractionSample = (double) gcbias[i].sample / (double) totalSampleCount;
+      gcbias[i].fractionReference = (double) gcbias[i].reference / (double) totalReferenceCount;
+      gcbias[i].percentileSample = (double) cumSample / (double) totalSampleCount;
+      gcbias[i].percentileReference = (double) cumReference / (double) totalReferenceCount;
+      gcbias[i].obsexp = 1;
+      if (gcbias[i].fractionReference > 0) gcbias[i].obsexp = gcbias[i].fractionSample / gcbias[i].fractionReference;
+    }
+    
     fai_destroy(faiRef);
     fai_destroy(faiMap);
     hts_idx_destroy(idx);
