@@ -308,7 +308,6 @@ namespace coralns
       }
     
       // Call CNVs
-      /*
       std::vector<CNV> cnvCalls;
       callCNVs(c, gcbound, gcContent, uniqContent, gcbias, cov, hdr, refIndex, cnvCalls);
       for(uint32_t i = 0; i < cnvCalls.size(); ++i) {
@@ -322,7 +321,7 @@ namespace coralns
 	  }
 	}
       }
-      */
+
       
       // BED File (target intervals)
       if (c.hasBedFile) {
@@ -542,7 +541,7 @@ namespace coralns
       ("sample,s", boost::program_options::value<std::string>(&c.sampleName)->default_value("NA12878"), "sample name")
       ("quality,q", boost::program_options::value<uint16_t>(&c.minQual)->default_value(10), "min. mapping quality")
       ("mappability,m", boost::program_options::value<boost::filesystem::path>(&c.mapFile), "input mappability map")
-      ("minsize,z", boost::program_options::value<uint32_t>(&c.minCnvSize)->default_value(250), "min. CNV size")
+      ("minsize,z", boost::program_options::value<uint32_t>(&c.minCnvSize)->default_value(500), "min. CNV size")
       ("ploidy,y", boost::program_options::value<uint16_t>(&c.ploidy)->default_value(2), "baseline ploidy")
       ("fragment,e", boost::program_options::value<float>(&c.fragmentUnique)->default_value(0.97), "min. fragment uniqueness [0,1]")
       ("outprefix,o", boost::program_options::value<std::string>(&c.outprefix)->default_value("outprefix"), "output file prefix")

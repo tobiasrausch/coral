@@ -196,7 +196,7 @@ namespace coralns
     
     // Iterate a couple CNV sizes to find breakpoint regions
     std::vector<float> totaldiff(mappable, 0);
-    for(int32_t cnvSize = c.minCnvSize; cnvSize <= 100000; cnvSize = (int32_t) (cnvSize * 1.3)) {
+    for(int32_t cnvSize = c.minCnvSize / 2; cnvSize <= 100000; cnvSize = (int32_t) (cnvSize * 1.3)) {
       double covsumLeft = 0;
       double expcovLeft = 0;
       double covsumRight = 0;
@@ -292,7 +292,7 @@ namespace coralns
 
       // Estimate CN in-between peaks
       std::vector<bool> peakUsed(peakCoords.size(), false);
-      for(uint32_t peakThreshold = 20; peakThreshold > 0; --peakThreshold) {
+      for(uint32_t peakThreshold = 20; peakThreshold > 1; --peakThreshold) {
 	uint32_t lastPeak = 0;
 	for(uint32_t i = 1; i < peakCoords.size(); ++i) {
 	  if (peakCoords[i].second >= peakThreshold) {
@@ -305,205 +305,297 @@ namespace coralns
 	      }
 	      double cn = c.ploidy * covsum / expcov;
 	      if (std::round(cn) != c.ploidy) {
-		peakUsed[lastPeak] = true;
-		peakUsed[i] = true;
-		peaks.push_back(std::make_pair(lastPeak, i));
-		// Shift peaks to optimum CN-shift, left boundary
-		// Iterate to the right
 		int32_t sw = 5000;
 		int32_t st = std::max(0, (int32_t) (peakCoords[lastPeak].first) - sw);
-		uint32_t mi = peakCoords[lastPeak].first;
 		double covsumLeft = 0;
 		double expcovLeft = 0;
-		for(uint32_t k = st; k < mi; ++k) {
+		for(uint32_t k = st; k < peakCoords[lastPeak].first; ++k) {
 		  covsumLeft += mapcov[k];
 		  expcovLeft += gcbias[mapGcContent[k]].coverage;
 		}
 		double cnLeft = c.ploidy * covsumLeft / expcovLeft;
-		double cnShift = std::abs(cnLeft - cn);
-		double offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
-		double bestOffset = offset;
-		int32_t bestIdx = mi;
-		while ((offset < bestOffset + 0.1) && (mi < ciCoords[lastPeak].second)) {
-		  covsum -= mapcov[mi];
-		  expcov -= gcbias[mapGcContent[mi]].coverage;
-		  covsumLeft += mapcov[mi];
-		  expcovLeft += gcbias[mapGcContent[mi]].coverage;
-		  ++mi;
-		  cn = c.ploidy * covsum / expcov;
-		  cnLeft = c.ploidy * covsumLeft / expcovLeft;
-		  cnShift = std::abs(cnLeft - cn);
-		  offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
-		  if (bestOffset > offset) {
+		if ((std::round(cnLeft) != std::round(cn)) && (std::abs(cnLeft - cn) > 0.5)) {
+		  int32_t ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].first) + sw);
+		  double covsumRight = 0;
+		  double expcovRight = 0;
+		  for(int32_t k = peakCoords[i].first; k < ed; ++k) {
+		    covsumRight += mapcov[k];
+		    expcovRight += gcbias[mapGcContent[k]].coverage;
+		  }
+		  double cnRight = c.ploidy * covsumRight / expcovRight;
+		  if ((std::round(cnRight) != std::round(cn)) && (std::abs(cnRight -cn) > 0.5)) {
+		    peakUsed[lastPeak] = true;
+		    peakUsed[i] = true;
+		    peaks.push_back(std::make_pair(lastPeak, i));
+
+		    // Shift peaks to optimum CN-shift, left boundary
+		    // Iterate to the right
+		    uint32_t mi = peakCoords[lastPeak].first;
+		    double cnShift = std::abs(cnLeft - cn);
+		    double offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
+		    double bestOffset = offset;
+		    int32_t bestIdx = mi;
+		    while ((offset < bestOffset + 0.1) && (mi < ciCoords[lastPeak].second)) {
+		      covsum -= mapcov[mi];
+		      expcov -= gcbias[mapGcContent[mi]].coverage;
+		      covsumLeft += mapcov[mi];
+		      expcovLeft += gcbias[mapGcContent[mi]].coverage;
+		      ++mi;
+		      cn = c.ploidy * covsum / expcov;
+		      cnLeft = c.ploidy * covsumLeft / expcovLeft;
+		      cnShift = std::abs(cnLeft - cn);
+		      offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
+		      if (bestOffset > offset) {
+			bestOffset = offset;
+			bestIdx = mi;
+		      }
+		    }
+		    peakCoords[lastPeak].first = bestIdx;
+		    // Update cn estimate
+		    covsum = 0;
+		    expcov = 0;
+		    for(uint32_t k = peakCoords[lastPeak].first; k < peakCoords[i].first; ++k) {
+		      covsum += mapcov[k];
+		      expcov += gcbias[mapGcContent[k]].coverage;
+		    }
+		    cn = c.ploidy * covsum / expcov;
+		    // Iterate to the left
+		    st = std::max(0, (int32_t) (peakCoords[lastPeak].first) - sw);
+		    mi = peakCoords[lastPeak].first;
+		    covsumLeft = 0;
+		    expcovLeft = 0;
+		    for(uint32_t k = st; k < mi; ++k) {
+		      covsumLeft += mapcov[k];
+		      expcovLeft += gcbias[mapGcContent[k]].coverage;
+		    }
+		    cnLeft = c.ploidy * covsumLeft / expcovLeft;
+		    cnShift = std::abs(cnLeft - cn);
+		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
 		    bestOffset = offset;
 		    bestIdx = mi;
-		  }
-		}
-		peakCoords[lastPeak].first = bestIdx;
-		// Update cn estimate
-		covsum = 0;
-		expcov = 0;
-		for(uint32_t k = peakCoords[lastPeak].first; k < peakCoords[i].first; ++k) {
-		  covsum += mapcov[k];
-		  expcov += gcbias[mapGcContent[k]].coverage;
-		}
-		cn = c.ploidy * covsum / expcov;
-		// Iterate to the left
-		st = std::max(0, (int32_t) (peakCoords[lastPeak].first) - sw);
-		mi = peakCoords[lastPeak].first;
-		covsumLeft = 0;
-		expcovLeft = 0;
-		for(uint32_t k = st; k < mi; ++k) {
-		  covsumLeft += mapcov[k];
-		  expcovLeft += gcbias[mapGcContent[k]].coverage;
-		}
-		cnLeft = c.ploidy * covsumLeft / expcovLeft;
-		cnShift = std::abs(cnLeft - cn);
-		offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
-		bestOffset = offset;
-		bestIdx = mi;
-		while ((offset < bestOffset + 0.1) && (mi > ciCoords[lastPeak].first)) {
-		  --mi;
-		  covsum += mapcov[mi];
-		  expcov += gcbias[mapGcContent[mi]].coverage;
-		  covsumLeft -= mapcov[mi];
-		  expcovLeft -= gcbias[mapGcContent[mi]].coverage;
-		  cn = c.ploidy * covsum / expcov;
-		  cnLeft = c.ploidy * covsumLeft / expcovLeft;
-		  cnShift = std::abs(cnLeft - cn);
-		  offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
-		  if (bestOffset > offset) {
+		    while ((offset < bestOffset + 0.1) && (mi > ciCoords[lastPeak].first)) {
+		      --mi;
+		      covsum += mapcov[mi];
+		      expcov += gcbias[mapGcContent[mi]].coverage;
+		      covsumLeft -= mapcov[mi];
+		      expcovLeft -= gcbias[mapGcContent[mi]].coverage;
+		      cn = c.ploidy * covsum / expcov;
+		      cnLeft = c.ploidy * covsumLeft / expcovLeft;
+		      cnShift = std::abs(cnLeft - cn);
+		      offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
+		      if (bestOffset > offset) {
+			bestOffset = offset;
+			bestIdx = mi;
+		      }
+		    }
+		    peakCoords[lastPeak].first = bestIdx;
+		    // Update cn estimate
+		    covsum = 0;
+		    expcov = 0;
+		    for(uint32_t k = peakCoords[lastPeak].first; k < peakCoords[i].first; ++k) {
+		      covsum += mapcov[k];
+		      expcov += gcbias[mapGcContent[k]].coverage;
+		    }
+		    cn = c.ploidy * covsum / expcov;
+		    // Adjust right peak
+		    // Iterate to the left
+		    mi = peakCoords[i].first;
+		    cnShift = std::abs(cnRight - cn);
+		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
 		    bestOffset = offset;
 		    bestIdx = mi;
-		  }
-		}
-		peakCoords[lastPeak].first = bestIdx;
-		// Update cn estimate
-		covsum = 0;
-		expcov = 0;
-		for(uint32_t k = peakCoords[lastPeak].first; k < peakCoords[i].first; ++k) {
-		  covsum += mapcov[k];
-		  expcov += gcbias[mapGcContent[k]].coverage;
-		}
-		cn = c.ploidy * covsum / expcov;
-		// Adjust right peak
-		// Iterate to the left
-		int32_t ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].first) + sw);
-		mi = peakCoords[i].first;
-		double covsumRight = 0;
-		double expcovRight = 0;
-		for(int32_t k = mi; k < ed; ++k) {
-		  covsumRight += mapcov[k];
-		  expcovRight += gcbias[mapGcContent[k]].coverage;
-		}
-		double cnRight = c.ploidy * covsumRight / expcovRight;
-		cnShift = std::abs(cnRight - cn);
-		offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
-		bestOffset = offset;
-		bestIdx = mi;
-		while ((offset < bestOffset + 0.1) && (mi > ciCoords[i].first)) {
-		  --mi;
-		  covsum -= mapcov[mi];
-		  expcov -= gcbias[mapGcContent[mi]].coverage;
-		  covsumRight += mapcov[mi];
-		  expcovRight += gcbias[mapGcContent[mi]].coverage;
-		  cn = c.ploidy * covsum / expcov;
-		  cnRight = c.ploidy * covsumRight / expcovRight;
-		  cnShift = std::abs(cnRight - cn);
-		  offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
-		  if (bestOffset > offset) {
+		    while ((offset < bestOffset + 0.1) && (mi > ciCoords[i].first)) {
+		      --mi;
+		      covsum -= mapcov[mi];
+		      expcov -= gcbias[mapGcContent[mi]].coverage;
+		      covsumRight += mapcov[mi];
+		      expcovRight += gcbias[mapGcContent[mi]].coverage;
+		      cn = c.ploidy * covsum / expcov;
+		      cnRight = c.ploidy * covsumRight / expcovRight;
+		      cnShift = std::abs(cnRight - cn);
+		      offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
+		      if (bestOffset > offset) {
+			bestOffset = offset;
+			bestIdx = mi;
+		      }
+		    }
+		    peakCoords[i].first = bestIdx;
+		    // Update cn estimate
+		    covsum = 0;
+		    expcov = 0;
+		    for(uint32_t k = peakCoords[lastPeak].first; k < peakCoords[i].first; ++k) {
+		      covsum += mapcov[k];
+		      expcov += gcbias[mapGcContent[k]].coverage;
+		    }
+		    cn = c.ploidy * covsum / expcov;
+		    // Adjust right peak
+		    // Iterate to the right
+		    ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].first) + sw);
+		    mi = peakCoords[i].first;
+		    covsumRight = 0;
+		    expcovRight = 0;
+		    for(int32_t k = mi; k < ed; ++k) {
+		      covsumRight += mapcov[k];
+		      expcovRight += gcbias[mapGcContent[k]].coverage;
+		    }
+		    cnRight = c.ploidy * covsumRight / expcovRight;
+		    cnShift = std::abs(cnRight - cn);
+		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
 		    bestOffset = offset;
 		    bestIdx = mi;
-		  }
-		}
-		peakCoords[i].first = bestIdx;
-		// Update cn estimate
-		covsum = 0;
-		expcov = 0;
-		for(uint32_t k = peakCoords[lastPeak].first; k < peakCoords[i].first; ++k) {
-		  covsum += mapcov[k];
-		  expcov += gcbias[mapGcContent[k]].coverage;
-		}
-		cn = c.ploidy * covsum / expcov;
-		// Adjust right peak
-		// Iterate to the right
-		ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].first) + sw);
-		mi = peakCoords[i].first;
-		covsumRight = 0;
-		expcovRight = 0;
-		for(int32_t k = mi; k < ed; ++k) {
-		  covsumRight += mapcov[k];
-		  expcovRight += gcbias[mapGcContent[k]].coverage;
-		}
-		cnRight = c.ploidy * covsumRight / expcovRight;
-		cnShift = std::abs(cnRight - cn);
-		offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
-		bestOffset = offset;
-		bestIdx = mi;
-		while ((offset < bestOffset + 0.1) && (mi < ciCoords[i].second)) {
-		  covsum += mapcov[mi];
-		  expcov += gcbias[mapGcContent[mi]].coverage;
-		  covsumRight -= mapcov[mi];
-		  expcovRight -= gcbias[mapGcContent[mi]].coverage;
-		  ++mi;
-		  cn = c.ploidy * covsum / expcov;
-		  cnRight = c.ploidy * covsumRight / expcovRight;
-		  cnShift = std::abs(cnRight - cn);
-		  offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
-		  //std::cerr << offset << ',' << bestOffset << ',' << mi << ',' << bestIdx << ',' << cnShift << ',' << cn << ',' << cnRight << ',' << mapcov[mi] << std::endl;
-		  if (bestOffset > offset) {
+		    while ((offset < bestOffset + 0.1) && (mi < ciCoords[i].second)) {
+		      covsum += mapcov[mi];
+		      expcov += gcbias[mapGcContent[mi]].coverage;
+		      covsumRight -= mapcov[mi];
+		      expcovRight -= gcbias[mapGcContent[mi]].coverage;
+		      ++mi;
+		      cn = c.ploidy * covsum / expcov;
+		      cnRight = c.ploidy * covsumRight / expcovRight;
+		      cnShift = std::abs(cnRight - cn);
+		      offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
+		      //std::cerr << offset << ',' << bestOffset << ',' << mi << ',' << bestIdx << ',' << cnShift << ',' << cn << ',' << cnRight << ',' << mapcov[mi] << std::endl;
+		      if (bestOffset > offset) {
+			bestOffset = offset;
+			bestIdx = mi;
+		      }
+		    }
+		    peakCoords[i].first = bestIdx;
+		    // Adjust confidence interval
+		    // Update cn estimate
+		    covsum = 0;
+		    expcov = 0;
+		    for(uint32_t k = peakCoords[lastPeak].first; k < peakCoords[i].first; ++k) {
+		      covsum += mapcov[k];
+		      expcov += gcbias[mapGcContent[k]].coverage;
+		    }
+		    cn = c.ploidy * covsum / expcov;
+		    // Iterate to the left
+		    st = std::max(0, (int32_t) (peakCoords[lastPeak].first) - sw);
+		    mi = peakCoords[lastPeak].first;
+		    covsumLeft = 0;
+		    expcovLeft = 0;
+		    for(uint32_t k = st; k < mi; ++k) {
+		      covsumLeft += mapcov[k];
+		      expcovLeft += gcbias[mapGcContent[k]].coverage;
+		    }
+		    cnLeft = c.ploidy * covsumLeft / expcovLeft;
+		    cnShift = std::abs(cnLeft - cn);
+		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
 		    bestOffset = offset;
-		    bestIdx = mi;
+		    while ((offset < bestOffset + 0.1) && (mi > ciCoords[lastPeak].first)) {
+		      --mi;
+		      covsum += mapcov[mi];
+		      expcov += gcbias[mapGcContent[mi]].coverage;
+		      covsumLeft -= mapcov[mi];
+		      expcovLeft -= gcbias[mapGcContent[mi]].coverage;
+		      cn = c.ploidy * covsum / expcov;
+		      cnLeft = c.ploidy * covsumLeft / expcovLeft;
+		      cnShift = std::abs(cnLeft - cn);
+		      offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
+		    }
+		    ciCoords[lastPeak].first = mi;
+		    // Update cn estimate
+		    covsum = 0;
+		    expcov = 0;
+		    for(uint32_t k = peakCoords[lastPeak].first; k < peakCoords[i].first; ++k) {
+		      covsum += mapcov[k];
+		      expcov += gcbias[mapGcContent[k]].coverage;
+		    }
+		    cn = c.ploidy * covsum / expcov;
+		    // Iterate to the right
+		    st = std::max(0, (int32_t) (peakCoords[lastPeak].first) - sw);
+		    mi = peakCoords[lastPeak].first;
+		    covsumLeft = 0;
+		    expcovLeft = 0;
+		    for(uint32_t k = st; k < mi; ++k) {
+		      covsumLeft += mapcov[k];
+		      expcovLeft += gcbias[mapGcContent[k]].coverage;
+		    }
+		    cnLeft = c.ploidy * covsumLeft / expcovLeft;
+		    cnShift = std::abs(cnLeft - cn);
+		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
+		    bestOffset = offset;
+		    while ((offset < bestOffset + 0.1) && (mi < ciCoords[lastPeak].second)) {
+		      covsum -= mapcov[mi];
+		      expcov -= gcbias[mapGcContent[mi]].coverage;
+		      covsumLeft += mapcov[mi];
+		      expcovLeft += gcbias[mapGcContent[mi]].coverage;
+		      ++mi;
+		      cn = c.ploidy * covsum / expcov;
+		      cnLeft = c.ploidy * covsumLeft / expcovLeft;
+		      cnShift = std::abs(cnLeft - cn);
+		      offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
+		    }
+		    ciCoords[lastPeak].second = mi;
+		    // Update cn estimate
+		    covsum = 0;
+		    expcov = 0;
+		    for(uint32_t k = peakCoords[lastPeak].first; k < peakCoords[i].first; ++k) {
+		      covsum += mapcov[k];
+		      expcov += gcbias[mapGcContent[k]].coverage;
+		    }
+		    cn = c.ploidy * covsum / expcov;
+		    // Adjust right confidence interval
+		    // Iterate to the left
+		    ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].first) + sw);
+		    mi = peakCoords[i].first;
+		    covsumRight = 0;
+		    expcovRight = 0;
+		    for(int32_t k = mi; k < ed; ++k) {
+		      covsumRight += mapcov[k];
+		      expcovRight += gcbias[mapGcContent[k]].coverage;
+		    }
+		    cnRight = c.ploidy * covsumRight / expcovRight;
+		    cnShift = std::abs(cnRight - cn);
+		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
+		    bestOffset = offset;
+		    while ((offset < bestOffset + 0.1) && (mi > ciCoords[i].first)) {
+		      --mi;
+		      covsum -= mapcov[mi];
+		      expcov -= gcbias[mapGcContent[mi]].coverage;
+		      covsumRight += mapcov[mi];
+		      expcovRight += gcbias[mapGcContent[mi]].coverage;
+		      cn = c.ploidy * covsum / expcov;
+		      cnRight = c.ploidy * covsumRight / expcovRight;
+		      cnShift = std::abs(cnRight - cn);
+		      offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
+		    }
+		    ciCoords[i].first = mi;
+		    // Update cn estimate
+		    covsum = 0;
+		    expcov = 0;
+		    for(uint32_t k = peakCoords[lastPeak].first; k < peakCoords[i].first; ++k) {
+		      covsum += mapcov[k];
+		      expcov += gcbias[mapGcContent[k]].coverage;
+		    }
+		    cn = c.ploidy * covsum / expcov;
+		    // Iterate to the right
+		    ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].first) + sw);
+		    mi = peakCoords[i].first;
+		    covsumRight = 0;
+		    expcovRight = 0;
+		    for(int32_t k = mi; k < ed; ++k) {
+		      covsumRight += mapcov[k];
+		      expcovRight += gcbias[mapGcContent[k]].coverage;
+		    }
+		    cnRight = c.ploidy * covsumRight / expcovRight;
+		    cnShift = std::abs(cnRight - cn);
+		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
+		    bestOffset = offset;
+		    while ((offset < bestOffset + 0.1) && (mi < ciCoords[i].second)) {
+		      covsum += mapcov[mi];
+		      expcov += gcbias[mapGcContent[mi]].coverage;
+		      covsumRight -= mapcov[mi];
+		      expcovRight -= gcbias[mapGcContent[mi]].coverage;
+		      ++mi;
+		      cn = c.ploidy * covsum / expcov;
+		      cnRight = c.ploidy * covsumRight / expcovRight;
+		      cnShift = std::abs(cnRight - cn);
+		      offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
+		    }
+		    ciCoords[i].second = mi;
 		  }
 		}
-		peakCoords[i].first = bestIdx;
-		// Adjust confidence interval
-		// Update cn estimate
-		covsum = 0;
-		expcov = 0;
-		for(uint32_t k = peakCoords[lastPeak].first; k < peakCoords[i].first; ++k) {
-		  covsum += mapcov[k];
-		  expcov += gcbias[mapGcContent[k]].coverage;
-		}
-		cn = c.ploidy * covsum / expcov;
-		// Iterate to the left
-		mi = peakCoords[lastPeak].first;
-		double estCN = std::round(cn);
-		offset = std::abs(estCN - cn);
-		bestOffset = offset;
-		bestIdx = mi;
-		while ((offset < bestOffset + 0.2) && (mi > ciCoords[lastPeak].first)) {
-		  --mi;
-		  covsum += mapcov[mi];
-		  expcov += gcbias[mapGcContent[mi]].coverage;
-		  cn = c.ploidy * covsum / expcov;
-		  offset = std::abs(estCN - cn);
-		  std::cerr << offset << ',' << bestOffset << ',' << mi << ',' << ciCoords[lastPeak].first << std::endl;
-		}
-		ciCoords[lastPeak].first = mi;
-		// Adjust confidence interval
-		// Update cn estimate
-		covsum = 0;
-		expcov = 0;
-		for(uint32_t k = peakCoords[lastPeak].first; k < peakCoords[i].first; ++k) {
-		  covsum += mapcov[k];
-		  expcov += gcbias[mapGcContent[k]].coverage;
-		}
-		cn = c.ploidy * covsum / expcov;
-		// Iterate to the right
-		mi = peakCoords[i].first;
-		estCN = std::round(cn);
-		offset = std::abs(estCN - cn);
-		bestOffset = offset;
-		bestIdx = mi;
-		while ((offset < bestOffset + 0.2) && (mi < ciCoords[i].second)) {
-		  covsum += mapcov[mi];
-		  expcov += gcbias[mapGcContent[mi]].coverage;
-		  ++mi;
-		  cn = c.ploidy * covsum / expcov;
-		  offset = std::abs(estCN - cn);
-		}
-		ciCoords[i].second = mi;
 	      }
 	    }
 	    lastPeak = i;
@@ -547,7 +639,10 @@ namespace coralns
 	expcov += gcbias[mapGcContent[k]].coverage;
       }
       double cn = c.ploidy * covsum / expcov;
-      cnvCalls.push_back(CNV(refIndex, mapToGenomic[peakCoords[peaks[i].first].first], mapToGenomic[peakCoords[peaks[i].second].first], mapToGenomic[ciCoords[peaks[i].first].first], mapToGenomic[ciCoords[peaks[i].first].second], mapToGenomic[ciCoords[peaks[i].second].first], mapToGenomic[ciCoords[peaks[i].second].second], cn, rdsupport));
+      int32_t svSize = mapToGenomic[peakCoords[peaks[i].second].first] - mapToGenomic[peakCoords[peaks[i].first].first];
+      if (svSize >= (int32_t) c.minCnvSize) {
+	cnvCalls.push_back(CNV(refIndex, mapToGenomic[peakCoords[peaks[i].first].first], mapToGenomic[peakCoords[peaks[i].second].first], mapToGenomic[ciCoords[peaks[i].first].first], mapToGenomic[ciCoords[peaks[i].first].second], mapToGenomic[ciCoords[peaks[i].second].first], mapToGenomic[ciCoords[peaks[i].second].second], cn, rdsupport));
+      }
     }
   }
   
