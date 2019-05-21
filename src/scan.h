@@ -201,9 +201,8 @@ namespace coralns
 
 	  // Insert size filter
 	  int32_t isize = (rec->core.pos + alignmentLength(rec)) - rec->core.mpos;
-	  if ((li.minNormalISize < isize) && (isize < li.maxNormalISize)) {
-	    midPoint = rec->core.mpos + (int32_t) (isize/2);
-	  } else continue;
+	  if ((li.minNormalISize < isize) && (isize < li.maxNormalISize)) midPoint = rec->core.mpos + (int32_t) (isize/2);
+	  else continue;
 	}
 
 	// Count fragment

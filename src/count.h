@@ -192,7 +192,8 @@ namespace coralns
       TCoverage cov(hdr->target_len[refIndex], 0);
 
       // Split-read breakpoints
-      std::vector<uint32_t> splitBp;
+      typedef std::pair<uint32_t, uint32_t> TPosSupport;
+      std::vector<TPosSupport> splitBp;
       {
 	// Split-read map
 	TCoverage splitCovLeft(hdr->target_len[refIndex], 0);
@@ -273,14 +274,9 @@ namespace coralns
 	      mateMap[hv] = false;
 	    }
 	    
-	    // Insert size filter
+	    // update midpoint
 	    int32_t isize = (rec->core.pos + alignmentLength(rec)) - rec->core.mpos;
-	    if ((li.minNormalISize < isize) && (isize < li.maxNormalISize)) {
-	      midPoint = rec->core.mpos + (int32_t) (isize/2);
-	    } else {
-	      if (rec->core.flag & BAM_FREVERSE) midPoint = rec->core.pos + alignmentLength(rec) - (c.meanisize / 2);
-	      else midPoint = rec->core.pos + (c.meanisize / 2);
-	    }
+	    if ((li.minNormalISize < isize) && (isize < li.maxNormalISize)) midPoint = rec->core.mpos + (int32_t) (isize/2);
 	  }
 	  
 	  // Count fragment
@@ -312,7 +308,21 @@ namespace coralns
       }
     
       // Call CNVs
-      //callCNVs(c, splitBp, gcbound, gcContent, uniqContent, gcbias, cov, cvar, gvar, hdr, refIndex);
+      /*
+      std::vector<CNV> cnvCalls;
+      callCNVs(c, gcbound, gcContent, uniqContent, gcbias, cov, hdr, refIndex, cnvCalls);
+      for(uint32_t i = 0; i < cnvCalls.size(); ++i) {
+	std::cerr << hdr->target_name[cnvCalls[i].chr] << '\t' << cnvCalls[i].start << '\t' << cnvCalls[i].end << '\t' << "CN=" << cnvCalls[i].cn << ";CIPOS=" << cnvCalls[i].ciposlow << "," << cnvCalls[i].ciposhigh << ";CIEND=" << cnvCalls[i].ciendlow << "," << cnvCalls[i].ciendhigh << ",RDSUPPORT=" << cnvCalls[i].rdsupport << std::endl;
+	for(uint32_t k = 0; k < splitBp.size(); ++k) {
+	  if ((cnvCalls[i].ciposlow < splitBp[k].first) && (splitBp[k].first < cnvCalls[i].ciposhigh)) {
+	    std::cerr << splitBp[k].first << ',' << splitBp[k].second << std::endl;
+	  }
+	  if ((cnvCalls[i].ciendlow < splitBp[k].first) && (splitBp[k].first < cnvCalls[i].ciendhigh)) {
+	    std::cerr << splitBp[k].first << ',' << splitBp[k].second << std::endl;
+	  }
+	}
+      }
+      */
       
       // BED File (target intervals)
       if (c.hasBedFile) {
@@ -686,6 +696,13 @@ namespace coralns
       
       // Estimate insert size
       getLibraryParams(c, li);
+      // Fix single-end libraries
+      if (!li.median) {
+	li.median = 250;
+	li.mad = 15;
+	li.minNormalISize = 0;
+	li.maxNormalISize = 400;
+      }
       c.meanisize = ((int32_t) (li.median / 2)) * 2 + 1;
       if (c.hasStatsFile) {
 	statsOut << "LP\t" << li.rs << ',' << li.median << ',' << li.mad << ',' << li.minNormalISize << ',' << li.maxNormalISize << std::endl;
@@ -750,6 +767,7 @@ namespace coralns
     if (ret != 0) return ret;
 
     // Segment
+    /*
     SegmentConfig segc;
     segc.k = 300;
     segc.epsilon = 1e-9;
@@ -757,6 +775,7 @@ namespace coralns
     segc.outfile = boost::filesystem::path(c.outprefix + ".segment.gz");
     segc.signal = boost::filesystem::path(c.outprefix + ".adaptive.cov.gz");
     segmentCovBaf(segc);
+    */
     
     // Done
     now = boost::posix_time::second_clock::local_time();
