@@ -40,6 +40,7 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include "count.h"
 #include "segment.h"
 #include "merge.h"
+#include "gmm.h"
 
 using namespace coralns;
 
