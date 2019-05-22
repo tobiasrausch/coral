@@ -236,10 +236,10 @@ namespace coralns
 	    double cnLeft = c.ploidy * covsumLeft / expcovLeft;
 	    double cnRight = c.ploidy * covsumRight / expcovRight;
 	    double cnShift = std::abs(cnLeft - cnRight);
-	    double offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cnLeft) - cnLeft) + std::abs(std::round(cnRight) - cnRight);
-	    if ((std::round(cnShift) >= 1) && (offset < 1)) {
-	      double scaling = std::round(cnShift) - offset;
-	      totaldiff[pos + spacer / 2] += std::round(cnShift) * scaling;
+	    double offset = std::abs(boost::math::lround(cnShift) - cnShift) + std::abs(boost::math::lround(cnLeft) - cnLeft) + std::abs(boost::math::lround(cnRight) - cnRight);
+	    if ((boost::math::lround(cnShift) >= 1) && (offset < 1)) {
+	      double scaling = boost::math::lround(cnShift) - offset;
+	      totaldiff[pos + spacer / 2] += boost::math::lround(cnShift) * scaling;
 	    }
 	  }
 	}
@@ -314,7 +314,7 @@ namespace coralns
 		expcov += gcbias[mapGcContent[k]].coverage;
 	      }
 	      double cn = c.ploidy * covsum / expcov;
-	      if (std::round(cn) != c.ploidy) {
+	      if (boost::math::lround(cn) != c.ploidy) {
 		int32_t sw = 5000;
 		int32_t st = std::max(0, (int32_t) (peakCoords[lastPeak].pos) - sw);
 		double covsumLeft = 0;
@@ -324,7 +324,7 @@ namespace coralns
 		  expcovLeft += gcbias[mapGcContent[k]].coverage;
 		}
 		double cnLeft = c.ploidy * covsumLeft / expcovLeft;
-		if ((std::round(cnLeft) != std::round(cn)) && (std::abs(cnLeft - cn) > 0.5)) {
+		if ((boost::math::lround(cnLeft) != boost::math::lround(cn)) && (std::abs(cnLeft - cn) > 0.5)) {
 		  int32_t ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].pos) + sw);
 		  double covsumRight = 0;
 		  double expcovRight = 0;
@@ -333,7 +333,7 @@ namespace coralns
 		    expcovRight += gcbias[mapGcContent[k]].coverage;
 		  }
 		  double cnRight = c.ploidy * covsumRight / expcovRight;
-		  if ((std::round(cnRight) != std::round(cn)) && (std::abs(cnRight -cn) > 0.5)) {
+		  if ((boost::math::lround(cnRight) != boost::math::lround(cn)) && (std::abs(cnRight -cn) > 0.5)) {
 		    peakUsed[lastPeak] = true;
 		    peakUsed[i] = true;
 		    peaks.push_back(std::make_pair(lastPeak, i));
@@ -342,7 +342,7 @@ namespace coralns
 		    // Iterate to the right
 		    uint32_t mi = peakCoords[lastPeak].pos;
 		    double cnShift = std::abs(cnLeft - cn);
-		    double offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
+		    double offset = std::abs(boost::math::lround(cnShift) - cnShift) + std::abs(boost::math::lround(cn) - cn) + std::abs(boost::math::lround(cnLeft) - cnLeft);
 		    double bestOffset = offset;
 		    int32_t bestIdx = mi;
 		    while ((offset < bestOffset + 0.1) && (mi < peakCoords[lastPeak].cihigh)) {
@@ -354,7 +354,7 @@ namespace coralns
 		      cn = c.ploidy * covsum / expcov;
 		      cnLeft = c.ploidy * covsumLeft / expcovLeft;
 		      cnShift = std::abs(cnLeft - cn);
-		      offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
+		      offset = std::abs(boost::math::lround(cnShift) - cnShift) + std::abs(boost::math::lround(cn) - cn) + std::abs(boost::math::lround(cnLeft) - cnLeft);
 		      if (bestOffset > offset) {
 			bestOffset = offset;
 			bestIdx = mi;
@@ -381,7 +381,7 @@ namespace coralns
 		    }
 		    cnLeft = c.ploidy * covsumLeft / expcovLeft;
 		    cnShift = std::abs(cnLeft - cn);
-		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
+		    offset = std::abs(boost::math::lround(cnShift) - cnShift) + std::abs(boost::math::lround(cn) - cn) + std::abs(boost::math::lround(cnLeft) - cnLeft);
 		    bestOffset = offset;
 		    bestIdx = mi;
 		    while ((offset < bestOffset + 0.1) && (mi > peakCoords[lastPeak].cilow)) {
@@ -393,7 +393,7 @@ namespace coralns
 		      cn = c.ploidy * covsum / expcov;
 		      cnLeft = c.ploidy * covsumLeft / expcovLeft;
 		      cnShift = std::abs(cnLeft - cn);
-		      offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
+		      offset = std::abs(boost::math::lround(cnShift) - cnShift) + std::abs(boost::math::lround(cn) - cn) + std::abs(boost::math::lround(cnLeft) - cnLeft);
 		      if (bestOffset > offset) {
 			bestOffset = offset;
 			bestIdx = mi;
@@ -413,7 +413,7 @@ namespace coralns
 		    // Iterate to the left
 		    mi = peakCoords[i].pos;
 		    cnShift = std::abs(cnRight - cn);
-		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
+		    offset = std::abs(boost::math::lround(cnShift) - cnShift) + std::abs(boost::math::lround(cn) - cn) + std::abs(boost::math::lround(cnRight) - cnRight);
 		    bestOffset = offset;
 		    bestIdx = mi;
 		    while ((offset < bestOffset + 0.1) && (mi > peakCoords[i].cilow)) {
@@ -425,7 +425,7 @@ namespace coralns
 		      cn = c.ploidy * covsum / expcov;
 		      cnRight = c.ploidy * covsumRight / expcovRight;
 		      cnShift = std::abs(cnRight - cn);
-		      offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
+		      offset = std::abs(boost::math::lround(cnShift) - cnShift) + std::abs(boost::math::lround(cn) - cn) + std::abs(boost::math::lround(cnRight) - cnRight);
 		      if (bestOffset > offset) {
 			bestOffset = offset;
 			bestIdx = mi;
@@ -453,7 +453,7 @@ namespace coralns
 		    }
 		    cnRight = c.ploidy * covsumRight / expcovRight;
 		    cnShift = std::abs(cnRight - cn);
-		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
+		    offset = std::abs(boost::math::lround(cnShift) - cnShift) + std::abs(boost::math::lround(cn) - cn) + std::abs(boost::math::lround(cnRight) - cnRight);
 		    bestOffset = offset;
 		    bestIdx = mi;
 		    while ((offset < bestOffset + 0.1) && (mi < peakCoords[i].cihigh)) {
@@ -465,7 +465,7 @@ namespace coralns
 		      cn = c.ploidy * covsum / expcov;
 		      cnRight = c.ploidy * covsumRight / expcovRight;
 		      cnShift = std::abs(cnRight - cn);
-		      offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
+		      offset = std::abs(boost::math::lround(cnShift) - cnShift) + std::abs(boost::math::lround(cn) - cn) + std::abs(boost::math::lround(cnRight) - cnRight);
 		      //std::cerr << offset << ',' << bestOffset << ',' << mi << ',' << bestIdx << ',' << cnShift << ',' << cn << ',' << cnRight << ',' << mapcov[mi] << std::endl;
 		      if (bestOffset > offset) {
 			bestOffset = offset;
@@ -494,7 +494,7 @@ namespace coralns
 		    }
 		    cnLeft = c.ploidy * covsumLeft / expcovLeft;
 		    cnShift = std::abs(cnLeft - cn);
-		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
+		    offset = std::abs(boost::math::lround(cnShift) - cnShift) + std::abs(boost::math::lround(cn) - cn) + std::abs(boost::math::lround(cnLeft) - cnLeft);
 		    bestOffset = offset;
 		    while ((offset < bestOffset + 0.1) && (mi > peakCoords[lastPeak].cilow)) {
 		      --mi;
@@ -505,7 +505,7 @@ namespace coralns
 		      cn = c.ploidy * covsum / expcov;
 		      cnLeft = c.ploidy * covsumLeft / expcovLeft;
 		      cnShift = std::abs(cnLeft - cn);
-		      offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
+		      offset = std::abs(boost::math::lround(cnShift) - cnShift) + std::abs(boost::math::lround(cn) - cn) + std::abs(boost::math::lround(cnLeft) - cnLeft);
 		    }
 		    peakCoords[lastPeak].cilow = mi;
 		    // Update cn estimate
@@ -527,7 +527,7 @@ namespace coralns
 		    }
 		    cnLeft = c.ploidy * covsumLeft / expcovLeft;
 		    cnShift = std::abs(cnLeft - cn);
-		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
+		    offset = std::abs(boost::math::lround(cnShift) - cnShift) + std::abs(boost::math::lround(cn) - cn) + std::abs(boost::math::lround(cnLeft) - cnLeft);
 		    bestOffset = offset;
 		    while ((offset < bestOffset + 0.1) && (mi < peakCoords[lastPeak].cihigh)) {
 		      covsum -= mapcov[mi];
@@ -538,7 +538,7 @@ namespace coralns
 		      cn = c.ploidy * covsum / expcov;
 		      cnLeft = c.ploidy * covsumLeft / expcovLeft;
 		      cnShift = std::abs(cnLeft - cn);
-		      offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
+		      offset = std::abs(boost::math::lround(cnShift) - cnShift) + std::abs(boost::math::lround(cn) - cn) + std::abs(boost::math::lround(cnLeft) - cnLeft);
 		    }
 		    peakCoords[lastPeak].cihigh = mi;
 		    // Update cn estimate
@@ -561,7 +561,7 @@ namespace coralns
 		    }
 		    cnRight = c.ploidy * covsumRight / expcovRight;
 		    cnShift = std::abs(cnRight - cn);
-		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
+		    offset = std::abs(boost::math::lround(cnShift) - cnShift) + std::abs(boost::math::lround(cn) - cn) + std::abs(boost::math::lround(cnRight) - cnRight);
 		    bestOffset = offset;
 		    while ((offset < bestOffset + 0.1) && (mi > peakCoords[i].cilow)) {
 		      --mi;
@@ -572,7 +572,7 @@ namespace coralns
 		      cn = c.ploidy * covsum / expcov;
 		      cnRight = c.ploidy * covsumRight / expcovRight;
 		      cnShift = std::abs(cnRight - cn);
-		      offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
+		      offset = std::abs(boost::math::lround(cnShift) - cnShift) + std::abs(boost::math::lround(cn) - cn) + std::abs(boost::math::lround(cnRight) - cnRight);
 		    }
 		    peakCoords[i].cilow = mi;
 		    // Update cn estimate
@@ -594,7 +594,7 @@ namespace coralns
 		    }
 		    cnRight = c.ploidy * covsumRight / expcovRight;
 		    cnShift = std::abs(cnRight - cn);
-		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
+		    offset = std::abs(boost::math::lround(cnShift) - cnShift) + std::abs(boost::math::lround(cn) - cn) + std::abs(boost::math::lround(cnRight) - cnRight);
 		    bestOffset = offset;
 		    while ((offset < bestOffset + 0.1) && (mi < peakCoords[i].cihigh)) {
 		      covsum += mapcov[mi];
@@ -605,7 +605,7 @@ namespace coralns
 		      cn = c.ploidy * covsum / expcov;
 		      cnRight = c.ploidy * covsumRight / expcovRight;
 		      cnShift = std::abs(cnRight - cn);
-		      offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
+		      offset = std::abs(boost::math::lround(cnShift) - cnShift) + std::abs(boost::math::lround(cn) - cn) + std::abs(boost::math::lround(cnRight) - cnRight);
 		    }
 		    peakCoords[i].cihigh = mi;
 		  }

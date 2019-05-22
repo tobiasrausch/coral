@@ -308,7 +308,6 @@ namespace coralns
       }
     
       // Call CNVs
-      /*
       std::vector<CNV> cnvCalls;
       callCNVs(c, gcbound, gcContent, uniqContent, gcbias, cov, hdr, refIndex, cnvCalls);
       for(uint32_t i = 0; i < cnvCalls.size(); ++i) {
@@ -322,7 +321,6 @@ namespace coralns
 	  }
 	}
       }
-      */
 
       
       // BED File (target intervals)
