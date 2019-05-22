@@ -41,7 +41,7 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include "segment.h"
 #include "scan.h"
 #include "util.h"
-
+#include "gmm.h"
 
 namespace coralns
 {
@@ -102,6 +102,9 @@ namespace coralns
 	return 1;
       }
     }
+
+    // Estimate SD
+    SDAggregator sda(c.minCnvSize);
     
     // Parse BAM file
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
@@ -306,12 +309,35 @@ namespace coralns
 	  dataOutBaf << std::string(hdr->target_name[refIndex]) << "\t" << cvar[refIndex][i].pos << "\t" << baf_control << "\t" << baf_target << std::endl;
 	}
       }
-    
+
+      // Estimate SDs
+      uint32_t widx = 0;
+      for(uint32_t ws = sda.wsinit; ws < 1000000; ws = ws * 2) {
+	for(uint32_t start = 0; start < hdr->target_len[refIndex]; start = start + ws) {
+	  if (start + ws < hdr->target_len[refIndex]) {
+	    double covsum = 0;
+	    double expcov = 0;
+	    for(uint32_t pos = start; pos < start + ws; ++pos) {
+	      if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
+		covsum += cov[pos];
+		expcov += gcbias[gcContent[pos]].coverage;
+	      }
+	    }
+	    if (expcov > 0) {
+	      double cn = c.ploidy * covsum / expcov;
+	      sda.cnSUM[widx] += std::abs(cn - c.ploidy) * std::abs(cn - c.ploidy);
+	      ++sda.cnCount[widx];
+	    }
+	  }
+	}
+	++widx;
+      }
+      
       // Call & genotype CNVs
       std::vector<CNV> cnvCalls;
       callCNVs(c, gcbound, gcContent, uniqContent, gcbias, cov, hdr, refIndex, cnvCalls);
       std::sort(cnvCalls.begin(), cnvCalls.end(), SortCNVs<CNV>());
-      genotypeCNVs(c, cnvCalls);
+      genotypeCNVs(c, sda, cnvCalls);
       
       // BED File (target intervals)
       if (c.hasBedFile) {
