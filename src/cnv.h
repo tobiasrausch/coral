@@ -71,10 +71,18 @@ namespace coralns
       float peakHeight;
       float penalty;
 
-    PeakInfo(uint32_t const p, uint32_t const cl, uint32_t const ch, float const ph) : pos(p), cilow(cl), cihigh(ch), peakHeight(ph), penalty(0) {}
+      PeakInfo(uint32_t const p, uint32_t const cl, uint32_t const ch, float const ph) : pos(p), cilow(cl), cihigh(ch), peakHeight(ph), penalty(0) {}
     };
 
 
+    template<typename TCNV>
+    struct SortCNVs : public std::binary_function<TCNV, TCNV, bool>
+      {
+	inline bool operator()(TCNV const& sv1, TCNV const& sv2) {
+	  return ((sv1.chr<sv2.chr) || ((sv1.chr==sv2.chr) && (sv1.start<sv2.start)) || ((sv1.chr==sv2.chr) && (sv1.start==sv2.start) && (sv1.end<sv2.end)) || ((sv1.chr==sv2.chr) && (sv1.start==sv2.start) && (sv1.end==sv2.end) && (sv1.penalty > sv2.penalty)));
+	}
+      };
+      
   
   template<typename TCoverage, typename TSplits>
   inline void

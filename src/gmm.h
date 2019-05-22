@@ -109,136 +109,62 @@ namespace coralns
 	}
 	*/
       }
-
-
       
       // Iterate all structural variants
       bcf1_t *rec = bcf_init();
       for(uint32_t i = 0; i < cnvCalls.size(); ++i) {
-	/*
-	  // Output main vcf fields
-      int32_t tmpi = bcf_hdr_id2int(hdr, BCF_DT_ID, "PASS");
-      if (svIter->chr == svIter->chr2) {
-	// Intra-chromosomal
-	if (((svIter->peSupport < 3) || (svIter->peMapQuality < 20)) && ((svIter->srSupport < 3) || (svIter->srMapQuality < 20))) tmpi = bcf_hdr_id2int(hdr, BCF_DT_ID, "LowQual");
-      } else {
-	// Inter-chromosomal
-	if (((svIter->peSupport < 5) || (svIter->peMapQuality < 20)) && ((svIter->srSupport < 5) || (svIter->srMapQuality < 20))) tmpi = bcf_hdr_id2int(hdr, BCF_DT_ID, "LowQual");
-      }
-      rec->rid = bcf_hdr_name2id(hdr, bamhd->target_name[svIter->chr]);
-      int32_t svStartPos = svIter->svStart - 1;
-      if (svStartPos < 1) svStartPos = 1;
-      int32_t svEndPos = svIter->svEnd;
-      if (svEndPos < 1) svEndPos = 1;
-      if (svEndPos >= (int32_t) bamhd->target_len[svIter->chr2]) svEndPos = bamhd->target_len[svIter->chr2] - 1;
-      rec->pos = svStartPos;
-      std::string id(_addID(svIter->svt));
-      std::string padNumber = boost::lexical_cast<std::string>(svIter->id);
-      padNumber.insert(padNumber.begin(), 8 - padNumber.length(), '0');
-      id += padNumber;
-      bcf_update_id(hdr, rec, id.c_str());
-      std::string alleles = _replaceIUPAC(svIter->alleles);
-      bcf_update_alleles_str(hdr, rec, alleles.c_str());
-      bcf_update_filter(hdr, rec, &tmpi, 1);
+	// Output main vcf fields
+	int32_t tmpi = bcf_hdr_id2int(hdr, BCF_DT_ID, "PASS");
+	//tmpi = bcf_hdr_id2int(hdr, BCF_DT_ID, "LowQual");
+	rec->rid = bcf_hdr_name2id(hdr, bamhd->target_name[cnvCalls[i].chr]);
+	int32_t svStartPos = cnvCalls[i].start;
+	if (svStartPos < 1) svStartPos = 1;
+	int32_t svEndPos = cnvCalls[i].end;
+	if (svEndPos < 1) svEndPos = 1;
+	if (svEndPos >= (int32_t) bamhd->target_len[cnvCalls[i].chr]) svEndPos = bamhd->target_len[cnvCalls[i].chr] - 1;
+	rec->pos = svStartPos;
+	std::string id("CNV");
+	std::string padNumber = boost::lexical_cast<std::string>(i + 1);
+	padNumber.insert(padNumber.begin(), 8 - padNumber.length(), '0');
+	id += padNumber;
+	bcf_update_id(hdr, rec, id.c_str());
+	std::string alleles = "N,<CNV>";
+	bcf_update_alleles_str(hdr, rec, alleles.c_str());
+	bcf_update_filter(hdr, rec, &tmpi, 1);
       
-      // Add INFO fields
-      if (svIter->precise) bcf_update_info_flag(hdr, rec, "PRECISE", NULL, 1);
-      else bcf_update_info_flag(hdr, rec, "IMPRECISE", NULL, 1);
-      bcf_update_info_string(hdr, rec, "SVTYPE", _addID(svIter->svt).c_str());
-      std::string dellyVersion("EMBL.DELLYv");
-      dellyVersion += dellyVersionNumber;
-      bcf_update_info_string(hdr,rec, "SVMETHOD", dellyVersion.c_str());
-      bcf_update_info_string(hdr,rec, "CHR2", bamhd->target_name[svIter->chr2]);
-      tmpi = svEndPos;
-      bcf_update_info_int32(hdr, rec, "END", &tmpi, 1);
-      tmpi = svIter->peSupport;
-      bcf_update_info_int32(hdr, rec, "PE", &tmpi, 1);
-      tmpi = svIter->peMapQuality;
-      bcf_update_info_int32(hdr, rec, "MAPQ", &tmpi, 1);
-      bcf_update_info_string(hdr, rec, "CT", _addOrientation(svIter->svt).c_str());
-      int32_t ciend[2];
-      ciend[0] = svIter->ciendlow;
-      ciend[1] = svIter->ciendhigh;
-      int32_t cipos[2];
-      cipos[0] = svIter->ciposlow;
-      cipos[1] = svIter->ciposhigh;
-      bcf_update_info_int32(hdr, rec, "CIPOS", cipos, 2);
-      bcf_update_info_int32(hdr, rec, "CIEND", ciend, 2);
-      
-      if (svIter->precise)  {
-	tmpi = svIter->srMapQuality;
-	bcf_update_info_int32(hdr, rec, "SRMAPQ", &tmpi, 1);
-	tmpi = svIter->insLen;
-	bcf_update_info_int32(hdr, rec, "INSLEN", &tmpi, 1);
-	tmpi = svIter->homLen;
-	bcf_update_info_int32(hdr, rec, "HOMLEN", &tmpi, 1);
-	tmpi = svIter->srSupport;
-	bcf_update_info_int32(hdr, rec, "SR", &tmpi, 1);
-	float tmpf = svIter->srAlignQuality;
+	// Add INFO fields
+	//bcf_update_info_flag(hdr, rec, "PRECISE", NULL, 1);
+	bcf_update_info_flag(hdr, rec, "IMPRECISE", NULL, 1);
+	std::string svt("CNV");
+	bcf_update_info_string(hdr, rec, "SVTYPE", svt.c_str());
+	std::string coralVersion("EMBL.CORALv");
+	coralVersion += coralVersionNumber;
+	bcf_update_info_string(hdr,rec, "SVMETHOD", coralVersion.c_str());
+	tmpi = svEndPos;
+	bcf_update_info_int32(hdr, rec, "END", &tmpi, 1);
+	int32_t ciend[2];
+	ciend[0] = cnvCalls[i].ciendlow;
+	ciend[1] = cnvCalls[i].ciendhigh;
+	int32_t cipos[2];
+	cipos[0] = cnvCalls[i].ciposlow;
+	cipos[1] = cnvCalls[i].ciposhigh;
+	bcf_update_info_int32(hdr, rec, "CIPOS", cipos, 2);
+	bcf_update_info_int32(hdr, rec, "CIEND", ciend, 2);
+      	float tmpf = 0;
 	bcf_update_info_float(hdr, rec, "SRQ", &tmpf, 1);
-	bcf_update_info_string(hdr, rec, "CONSENSUS", svIter->consensus.c_str());
-	tmpf = entropy(svIter->consensus);
-	bcf_update_info_float(hdr, rec, "CE", &tmpf, 1);
-      }
       
-      // Add genotype columns
-      for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
-	// Counters
-	rcl[file_c] = 0;
-	rc[file_c] = 0;
-	rcr[file_c] = 0;
-	cnest[file_c] = 0;
-	drcount[file_c] = 0;
-	dvcount[file_c] = 0;
-	if (c.isHaplotagged) {
-	  hp1drcount[file_c] = 0;
-	  hp2drcount[file_c] = 0;
-	  hp1dvcount[file_c] = 0;
-	  hp2dvcount[file_c] = 0;
-	}
-	rrcount[file_c] = 0;
-	rvcount[file_c] = 0;
-	if (c.isHaplotagged) {
-	  hp1rrcount[file_c] = 0;
-	  hp2rrcount[file_c] = 0;
-	  hp1rvcount[file_c] = 0;
-	  hp2rvcount[file_c] = 0;
-	}
-	drcount[file_c] = spanCountMap[file_c][svIter->id].ref.size();
-	dvcount[file_c] = spanCountMap[file_c][svIter->id].alt.size();
-	if (c.isHaplotagged) {
-	  hp1drcount[file_c] = spanCountMap[file_c][svIter->id].refh1;
-	  hp2drcount[file_c] = spanCountMap[file_c][svIter->id].refh2;
-	  hp1dvcount[file_c] = spanCountMap[file_c][svIter->id].alth1;
-	  hp2dvcount[file_c] = spanCountMap[file_c][svIter->id].alth2;
-	}
-	rrcount[file_c] = jctCountMap[file_c][svIter->id].ref.size();
-	rvcount[file_c] = jctCountMap[file_c][svIter->id].alt.size();
-	if (c.isHaplotagged) {
-	  hp1rrcount[file_c] = jctCountMap[file_c][svIter->id].refh1;
-	  hp2rrcount[file_c] = jctCountMap[file_c][svIter->id].refh2;
-	  hp1rvcount[file_c] = jctCountMap[file_c][svIter->id].alth1;
-	  hp2rvcount[file_c] = jctCountMap[file_c][svIter->id].alth2;
-	}
-	
+	// Add genotype columns
+	cnest[0] = 0;
+
 	// Compute GLs
-	if (svIter->precise) _computeGLs(bl, jctCountMap[file_c][svIter->id].ref, jctCountMap[file_c][svIter->id].alt, gls, gqval, gts, file_c);
-	else _computeGLs(bl, spanCountMap[file_c][svIter->id].ref, spanCountMap[file_c][svIter->id].alt, gls, gqval, gts, file_c);
+	gqval[0] = 10;
+	//if (svIter->precise) _computeGLs(bl, jctCountMap[file_c][svIter->id].ref, jctCountMap[file_c][svIter->id].alt, gls, gqval, gts, file_c);
+	//else _computeGLs(bl, spanCountMap[file_c][svIter->id].ref, spanCountMap[file_c][svIter->id].alt, gls, gqval, gts, file_c);
 	
-	// Compute RCs
-	rcl[file_c] = readCountMap[file_c][svIter->id].leftRC;
-	rc[file_c] = readCountMap[file_c][svIter->id].rc;
-	rcr[file_c] = readCountMap[file_c][svIter->id].rightRC;
-	cnest[file_c] = -1;
-	if ((rcl[file_c] + rcr[file_c]) > 0) cnest[file_c] = boost::math::iround( 2.0 * (double) rc[file_c] / (double) (rcl[file_c] + rcr[file_c]) );
-      
 	// Genotype filter
-	if (gqval[file_c] < 15) ftarr[file_c] = "LowQual";
-	else ftarr[file_c] = "PASS";
-	  */
-      // ToDo
-      //rec->qual = 0;
-	
+	if (gqval[0] < 15) ftarr[0] = "LowQual";
+	else ftarr[0] = "PASS";
+	rec->qual = 0;
 	bcf_update_genotypes(hdr, rec, gts, bcf_hdr_nsamples(hdr) * 2);
 	bcf_update_format_float(hdr, rec, "GL",  gls, bcf_hdr_nsamples(hdr) * 3);
 	bcf_update_format_int32(hdr, rec, "GQ", gqval, bcf_hdr_nsamples(hdr));
