@@ -308,10 +308,11 @@ namespace coralns
       }
     
       // Call CNVs
+      /*
       std::vector<CNV> cnvCalls;
       callCNVs(c, gcbound, gcContent, uniqContent, gcbias, cov, hdr, refIndex, cnvCalls);
       for(uint32_t i = 0; i < cnvCalls.size(); ++i) {
-	std::cerr << hdr->target_name[cnvCalls[i].chr] << '\t' << cnvCalls[i].start << '\t' << cnvCalls[i].end << '\t' << "CN=" << cnvCalls[i].cn << ";CIPOS=" << cnvCalls[i].ciposlow << "," << cnvCalls[i].ciposhigh << ";CIEND=" << cnvCalls[i].ciendlow << "," << cnvCalls[i].ciendhigh << ",RDSUPPORT=" << cnvCalls[i].rdsupport << std::endl;
+	std::cerr << hdr->target_name[cnvCalls[i].chr] << '\t' << cnvCalls[i].start << '\t' << cnvCalls[i].end << '\t' << "CN=" << cnvCalls[i].cn << ";CIPOS=" << cnvCalls[i].ciposlow << "," << cnvCalls[i].ciposhigh << ";CIEND=" << cnvCalls[i].ciendlow << "," << cnvCalls[i].ciendhigh << ",RDSUPPORT=" << cnvCalls[i].rdsupport << ",PENALTY=" << cnvCalls[i].penalty << ",MAPPABLE=" << cnvCalls[i].mappable << std::endl;
 	for(uint32_t k = 0; k < splitBp.size(); ++k) {
 	  if ((cnvCalls[i].ciposlow < splitBp[k].first) && (splitBp[k].first < cnvCalls[i].ciposhigh)) {
 	    std::cerr << splitBp[k].first << ',' << splitBp[k].second << std::endl;
@@ -321,6 +322,7 @@ namespace coralns
 	  }
 	}
       }
+      */
 
       
       // BED File (target intervals)

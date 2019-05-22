@@ -58,10 +58,22 @@ namespace coralns
     int32_t ciendhigh;
     float cn;
     float rdsupport;
+    float penalty;
+    float mappable;
     
-  CNV(int32_t const c, int32_t const s, int32_t const e, int32_t const cil, int32_t const cih, int32_t const cel, int32_t ceh, float const estcn, float const sp) : chr(c), start(s), end(e), ciposlow(cil), ciposhigh(cih), ciendlow(cel), ciendhigh(ceh), cn(estcn), rdsupport(sp) {}
+  CNV(int32_t const c, int32_t const s, int32_t const e, int32_t const cil, int32_t const cih, int32_t const cel, int32_t ceh, float const estcn, float const sp, float const pty, float const mp) : chr(c), start(s), end(e), ciposlow(cil), ciposhigh(cih), ciendlow(cel), ciendhigh(ceh), cn(estcn), rdsupport(sp), penalty(pty), mappable(mp) {}
   };
-    
+
+    struct PeakInfo {
+      uint32_t pos;
+      uint32_t cilow;
+      uint32_t cihigh;
+      float peakHeight;
+      float penalty;
+
+    PeakInfo(uint32_t const p, uint32_t const cl, uint32_t const ch, float const ph) : pos(p), cilow(cl), cihigh(ch), peakHeight(ph), penalty(0) {}
+    };
+
 
   
   template<typename TCoverage, typename TSplits>
@@ -164,6 +176,9 @@ namespace coralns
   template<typename TConfig, typename TGcBias, typename TCoverage>
   inline void
     callCNVs(TConfig const& c, std::pair<uint32_t, uint32_t> const& gcbound, std::vector<uint16_t> const& gcContent, std::vector<uint16_t> const& uniqContent, TGcBias const& gcbias, TCoverage const& cov, bam_hdr_t const* hdr, int32_t const refIndex, std::vector<CNV>& cnvCalls) {
+
+    uint32_t rdThreshold = 5;
+    
     // Shrink to mappable pos
     int32_t mappable = 0;
     for(uint32_t pos = 0; pos < hdr->target_len[refIndex]; ++pos) {
@@ -230,9 +245,9 @@ namespace coralns
 	}
       }
     }
-    // We require true CN-shift
+    // Erase small peaks
     for(int32_t i = 0; i < mappable; ++i) {
-      if (totaldiff[i] < 0.8) totaldiff[i] = 0;
+      if (totaldiff[i] < ((double) rdThreshold / 2.0)) totaldiff[i] = 0;
     }
 
     // Debug
@@ -243,11 +258,7 @@ namespace coralns
     // Find peaks
     typedef std::pair<uint32_t, uint32_t> TPeakPair;
     std::vector<TPeakPair> peaks;
-    typedef std::pair<uint32_t, uint32_t> TCIPos;
-    typedef std::pair<uint32_t, float> TSummit;
-    std::vector<TSummit> peakCoords;
-    std::vector<TCIPos> ciCoords;
-    std::vector<uint32_t> coords;
+    std::vector<PeakInfo> peakCoords;
     {
       // Find peak boundaries
       std::vector<uint32_t> peakMetrics;
@@ -286,39 +297,38 @@ namespace coralns
       
       // Store peak position and height
       for(uint32_t i = 0; i < peakMetrics.size(); i += 3) {
-	peakCoords.push_back(std::make_pair(peakMetrics[i+1], totaldiff[peakMetrics[i+1]]));
-	ciCoords.push_back(std::make_pair(peakMetrics[i], peakMetrics[i+2]));
+	peakCoords.push_back(PeakInfo(peakMetrics[i+1], peakMetrics[i], peakMetrics[i+2], totaldiff[peakMetrics[i+1]]));
       }
 
       // Estimate CN in-between peaks
       std::vector<bool> peakUsed(peakCoords.size(), false);
-      for(uint32_t peakThreshold = 20; peakThreshold > 1; --peakThreshold) {
+      for(uint32_t peakThreshold = 20; peakThreshold >= rdThreshold; --peakThreshold) {
 	uint32_t lastPeak = 0;
 	for(uint32_t i = 1; i < peakCoords.size(); ++i) {
-	  if (peakCoords[i].second >= peakThreshold) {
-	    if (((peakCoords[i].first - peakCoords[lastPeak].first) >= c.minCnvSize) && (!peakUsed[lastPeak]) && (!peakUsed[i])) {
+	  if (peakCoords[i].peakHeight >= peakThreshold) {
+	    if (((peakCoords[i].pos - peakCoords[lastPeak].pos) >= c.minCnvSize) && (!peakUsed[lastPeak]) && (!peakUsed[i])) {
 	      double covsum = 0;
 	      double expcov = 0;
-	      for(uint32_t k = peakCoords[lastPeak].first; k < peakCoords[i].first; ++k) {
+	      for(uint32_t k = peakCoords[lastPeak].pos; k < peakCoords[i].pos; ++k) {
 		covsum += mapcov[k];
 		expcov += gcbias[mapGcContent[k]].coverage;
 	      }
 	      double cn = c.ploidy * covsum / expcov;
 	      if (std::round(cn) != c.ploidy) {
 		int32_t sw = 5000;
-		int32_t st = std::max(0, (int32_t) (peakCoords[lastPeak].first) - sw);
+		int32_t st = std::max(0, (int32_t) (peakCoords[lastPeak].pos) - sw);
 		double covsumLeft = 0;
 		double expcovLeft = 0;
-		for(uint32_t k = st; k < peakCoords[lastPeak].first; ++k) {
+		for(uint32_t k = st; k < peakCoords[lastPeak].pos; ++k) {
 		  covsumLeft += mapcov[k];
 		  expcovLeft += gcbias[mapGcContent[k]].coverage;
 		}
 		double cnLeft = c.ploidy * covsumLeft / expcovLeft;
 		if ((std::round(cnLeft) != std::round(cn)) && (std::abs(cnLeft - cn) > 0.5)) {
-		  int32_t ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].first) + sw);
+		  int32_t ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].pos) + sw);
 		  double covsumRight = 0;
 		  double expcovRight = 0;
-		  for(int32_t k = peakCoords[i].first; k < ed; ++k) {
+		  for(int32_t k = peakCoords[i].pos; k < ed; ++k) {
 		    covsumRight += mapcov[k];
 		    expcovRight += gcbias[mapGcContent[k]].coverage;
 		  }
@@ -330,12 +340,12 @@ namespace coralns
 
 		    // Shift peaks to optimum CN-shift, left boundary
 		    // Iterate to the right
-		    uint32_t mi = peakCoords[lastPeak].first;
+		    uint32_t mi = peakCoords[lastPeak].pos;
 		    double cnShift = std::abs(cnLeft - cn);
 		    double offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
 		    double bestOffset = offset;
 		    int32_t bestIdx = mi;
-		    while ((offset < bestOffset + 0.1) && (mi < ciCoords[lastPeak].second)) {
+		    while ((offset < bestOffset + 0.1) && (mi < peakCoords[lastPeak].cihigh)) {
 		      covsum -= mapcov[mi];
 		      expcov -= gcbias[mapGcContent[mi]].coverage;
 		      covsumLeft += mapcov[mi];
@@ -350,18 +360,19 @@ namespace coralns
 			bestIdx = mi;
 		      }
 		    }
-		    peakCoords[lastPeak].first = bestIdx;
+		    peakCoords[lastPeak].pos = bestIdx;
+		    peakCoords[lastPeak].penalty = bestOffset;
 		    // Update cn estimate
 		    covsum = 0;
 		    expcov = 0;
-		    for(uint32_t k = peakCoords[lastPeak].first; k < peakCoords[i].first; ++k) {
+		    for(uint32_t k = peakCoords[lastPeak].pos; k < peakCoords[i].pos; ++k) {
 		      covsum += mapcov[k];
 		      expcov += gcbias[mapGcContent[k]].coverage;
 		    }
 		    cn = c.ploidy * covsum / expcov;
 		    // Iterate to the left
-		    st = std::max(0, (int32_t) (peakCoords[lastPeak].first) - sw);
-		    mi = peakCoords[lastPeak].first;
+		    st = std::max(0, (int32_t) (peakCoords[lastPeak].pos) - sw);
+		    mi = peakCoords[lastPeak].pos;
 		    covsumLeft = 0;
 		    expcovLeft = 0;
 		    for(uint32_t k = st; k < mi; ++k) {
@@ -373,7 +384,7 @@ namespace coralns
 		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
 		    bestOffset = offset;
 		    bestIdx = mi;
-		    while ((offset < bestOffset + 0.1) && (mi > ciCoords[lastPeak].first)) {
+		    while ((offset < bestOffset + 0.1) && (mi > peakCoords[lastPeak].cilow)) {
 		      --mi;
 		      covsum += mapcov[mi];
 		      expcov += gcbias[mapGcContent[mi]].coverage;
@@ -388,23 +399,24 @@ namespace coralns
 			bestIdx = mi;
 		      }
 		    }
-		    peakCoords[lastPeak].first = bestIdx;
+		    peakCoords[lastPeak].pos = bestIdx;
+		    peakCoords[lastPeak].penalty = bestOffset;
 		    // Update cn estimate
 		    covsum = 0;
 		    expcov = 0;
-		    for(uint32_t k = peakCoords[lastPeak].first; k < peakCoords[i].first; ++k) {
+		    for(uint32_t k = peakCoords[lastPeak].pos; k < peakCoords[i].pos; ++k) {
 		      covsum += mapcov[k];
 		      expcov += gcbias[mapGcContent[k]].coverage;
 		    }
 		    cn = c.ploidy * covsum / expcov;
 		    // Adjust right peak
 		    // Iterate to the left
-		    mi = peakCoords[i].first;
+		    mi = peakCoords[i].pos;
 		    cnShift = std::abs(cnRight - cn);
 		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
 		    bestOffset = offset;
 		    bestIdx = mi;
-		    while ((offset < bestOffset + 0.1) && (mi > ciCoords[i].first)) {
+		    while ((offset < bestOffset + 0.1) && (mi > peakCoords[i].cilow)) {
 		      --mi;
 		      covsum -= mapcov[mi];
 		      expcov -= gcbias[mapGcContent[mi]].coverage;
@@ -419,19 +431,20 @@ namespace coralns
 			bestIdx = mi;
 		      }
 		    }
-		    peakCoords[i].first = bestIdx;
+		    peakCoords[i].pos = bestIdx;
+		    peakCoords[i].penalty = bestOffset;
 		    // Update cn estimate
 		    covsum = 0;
 		    expcov = 0;
-		    for(uint32_t k = peakCoords[lastPeak].first; k < peakCoords[i].first; ++k) {
+		    for(uint32_t k = peakCoords[lastPeak].pos; k < peakCoords[i].pos; ++k) {
 		      covsum += mapcov[k];
 		      expcov += gcbias[mapGcContent[k]].coverage;
 		    }
 		    cn = c.ploidy * covsum / expcov;
 		    // Adjust right peak
 		    // Iterate to the right
-		    ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].first) + sw);
-		    mi = peakCoords[i].first;
+		    ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].pos) + sw);
+		    mi = peakCoords[i].pos;
 		    covsumRight = 0;
 		    expcovRight = 0;
 		    for(int32_t k = mi; k < ed; ++k) {
@@ -443,7 +456,7 @@ namespace coralns
 		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
 		    bestOffset = offset;
 		    bestIdx = mi;
-		    while ((offset < bestOffset + 0.1) && (mi < ciCoords[i].second)) {
+		    while ((offset < bestOffset + 0.1) && (mi < peakCoords[i].cihigh)) {
 		      covsum += mapcov[mi];
 		      expcov += gcbias[mapGcContent[mi]].coverage;
 		      covsumRight -= mapcov[mi];
@@ -459,19 +472,20 @@ namespace coralns
 			bestIdx = mi;
 		      }
 		    }
-		    peakCoords[i].first = bestIdx;
+		    peakCoords[i].pos = bestIdx;
+		    peakCoords[i].penalty = bestOffset;
 		    // Adjust confidence interval
 		    // Update cn estimate
 		    covsum = 0;
 		    expcov = 0;
-		    for(uint32_t k = peakCoords[lastPeak].first; k < peakCoords[i].first; ++k) {
+		    for(uint32_t k = peakCoords[lastPeak].pos; k < peakCoords[i].pos; ++k) {
 		      covsum += mapcov[k];
 		      expcov += gcbias[mapGcContent[k]].coverage;
 		    }
 		    cn = c.ploidy * covsum / expcov;
 		    // Iterate to the left
-		    st = std::max(0, (int32_t) (peakCoords[lastPeak].first) - sw);
-		    mi = peakCoords[lastPeak].first;
+		    st = std::max(0, (int32_t) (peakCoords[lastPeak].pos) - sw);
+		    mi = peakCoords[lastPeak].pos;
 		    covsumLeft = 0;
 		    expcovLeft = 0;
 		    for(uint32_t k = st; k < mi; ++k) {
@@ -482,7 +496,7 @@ namespace coralns
 		    cnShift = std::abs(cnLeft - cn);
 		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
 		    bestOffset = offset;
-		    while ((offset < bestOffset + 0.1) && (mi > ciCoords[lastPeak].first)) {
+		    while ((offset < bestOffset + 0.1) && (mi > peakCoords[lastPeak].cilow)) {
 		      --mi;
 		      covsum += mapcov[mi];
 		      expcov += gcbias[mapGcContent[mi]].coverage;
@@ -493,18 +507,18 @@ namespace coralns
 		      cnShift = std::abs(cnLeft - cn);
 		      offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
 		    }
-		    ciCoords[lastPeak].first = mi;
+		    peakCoords[lastPeak].cilow = mi;
 		    // Update cn estimate
 		    covsum = 0;
 		    expcov = 0;
-		    for(uint32_t k = peakCoords[lastPeak].first; k < peakCoords[i].first; ++k) {
+		    for(uint32_t k = peakCoords[lastPeak].pos; k < peakCoords[i].pos; ++k) {
 		      covsum += mapcov[k];
 		      expcov += gcbias[mapGcContent[k]].coverage;
 		    }
 		    cn = c.ploidy * covsum / expcov;
 		    // Iterate to the right
-		    st = std::max(0, (int32_t) (peakCoords[lastPeak].first) - sw);
-		    mi = peakCoords[lastPeak].first;
+		    st = std::max(0, (int32_t) (peakCoords[lastPeak].pos) - sw);
+		    mi = peakCoords[lastPeak].pos;
 		    covsumLeft = 0;
 		    expcovLeft = 0;
 		    for(uint32_t k = st; k < mi; ++k) {
@@ -515,7 +529,7 @@ namespace coralns
 		    cnShift = std::abs(cnLeft - cn);
 		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
 		    bestOffset = offset;
-		    while ((offset < bestOffset + 0.1) && (mi < ciCoords[lastPeak].second)) {
+		    while ((offset < bestOffset + 0.1) && (mi < peakCoords[lastPeak].cihigh)) {
 		      covsum -= mapcov[mi];
 		      expcov -= gcbias[mapGcContent[mi]].coverage;
 		      covsumLeft += mapcov[mi];
@@ -526,19 +540,19 @@ namespace coralns
 		      cnShift = std::abs(cnLeft - cn);
 		      offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnLeft) - cnLeft);
 		    }
-		    ciCoords[lastPeak].second = mi;
+		    peakCoords[lastPeak].cihigh = mi;
 		    // Update cn estimate
 		    covsum = 0;
 		    expcov = 0;
-		    for(uint32_t k = peakCoords[lastPeak].first; k < peakCoords[i].first; ++k) {
+		    for(uint32_t k = peakCoords[lastPeak].pos; k < peakCoords[i].pos; ++k) {
 		      covsum += mapcov[k];
 		      expcov += gcbias[mapGcContent[k]].coverage;
 		    }
 		    cn = c.ploidy * covsum / expcov;
 		    // Adjust right confidence interval
 		    // Iterate to the left
-		    ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].first) + sw);
-		    mi = peakCoords[i].first;
+		    ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].pos) + sw);
+		    mi = peakCoords[i].pos;
 		    covsumRight = 0;
 		    expcovRight = 0;
 		    for(int32_t k = mi; k < ed; ++k) {
@@ -549,7 +563,7 @@ namespace coralns
 		    cnShift = std::abs(cnRight - cn);
 		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
 		    bestOffset = offset;
-		    while ((offset < bestOffset + 0.1) && (mi > ciCoords[i].first)) {
+		    while ((offset < bestOffset + 0.1) && (mi > peakCoords[i].cilow)) {
 		      --mi;
 		      covsum -= mapcov[mi];
 		      expcov -= gcbias[mapGcContent[mi]].coverage;
@@ -560,18 +574,18 @@ namespace coralns
 		      cnShift = std::abs(cnRight - cn);
 		      offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
 		    }
-		    ciCoords[i].first = mi;
+		    peakCoords[i].cilow = mi;
 		    // Update cn estimate
 		    covsum = 0;
 		    expcov = 0;
-		    for(uint32_t k = peakCoords[lastPeak].first; k < peakCoords[i].first; ++k) {
+		    for(uint32_t k = peakCoords[lastPeak].pos; k < peakCoords[i].pos; ++k) {
 		      covsum += mapcov[k];
 		      expcov += gcbias[mapGcContent[k]].coverage;
 		    }
 		    cn = c.ploidy * covsum / expcov;
 		    // Iterate to the right
-		    ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].first) + sw);
-		    mi = peakCoords[i].first;
+		    ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].pos) + sw);
+		    mi = peakCoords[i].pos;
 		    covsumRight = 0;
 		    expcovRight = 0;
 		    for(int32_t k = mi; k < ed; ++k) {
@@ -582,7 +596,7 @@ namespace coralns
 		    cnShift = std::abs(cnRight - cn);
 		    offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
 		    bestOffset = offset;
-		    while ((offset < bestOffset + 0.1) && (mi < ciCoords[i].second)) {
+		    while ((offset < bestOffset + 0.1) && (mi < peakCoords[i].cihigh)) {
 		      covsum += mapcov[mi];
 		      expcov += gcbias[mapGcContent[mi]].coverage;
 		      covsumRight -= mapcov[mi];
@@ -593,7 +607,7 @@ namespace coralns
 		      cnShift = std::abs(cnRight - cn);
 		      offset = std::abs(std::round(cnShift) - cnShift) + std::abs(std::round(cn) - cn) + std::abs(std::round(cnRight) - cnRight);
 		    }
-		    ciCoords[i].second = mi;
+		    peakCoords[i].cihigh = mi;
 		  }
 		}
 	      }
@@ -602,46 +616,51 @@ namespace coralns
 	  }
 	}
       }
-
-      // Store peak coordinates
-      for(uint32_t i = 0; i < peaks.size(); ++i) {
-	coords.push_back(ciCoords[peaks[i].first].first);
-	coords.push_back(peakCoords[peaks[i].first].first);
-	coords.push_back(ciCoords[peaks[i].first].second);
-	coords.push_back(ciCoords[peaks[i].second].first);
-	coords.push_back(peakCoords[peaks[i].second].first);
-	coords.push_back(ciCoords[peaks[i].second].second);
-      }
     }
-    std::sort(coords.begin(), coords.end());
 
     // Translate back from mappable space to genomic space
     std::map<uint32_t, uint32_t> mapToGenomic;
-    uint32_t pointer = 0;
-    mapIdx = 0;
-    for(uint32_t pos = 0; pos < hdr->target_len[refIndex]; ++pos) {
-      if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
-	while ((pointer < coords.size()) && (coords[pointer] == mapIdx)) {
-	  mapToGenomic.insert(std::make_pair(coords[pointer], pos));
-	  ++pointer;
+    {      
+      // Collect peak coordinates
+      std::vector<uint32_t> coords;
+      for(uint32_t i = 0; i < peaks.size(); ++i) {
+	coords.push_back(peakCoords[peaks[i].first].cilow);
+	coords.push_back(peakCoords[peaks[i].first].pos);
+	coords.push_back(peakCoords[peaks[i].first].cihigh);
+	coords.push_back(peakCoords[peaks[i].second].cilow);
+	coords.push_back(peakCoords[peaks[i].second].pos);
+	coords.push_back(peakCoords[peaks[i].second].cihigh);
+      }
+      std::sort(coords.begin(), coords.end());
+      uint32_t pointer = 0;
+      mapIdx = 0;
+      for(uint32_t pos = 0; pos < hdr->target_len[refIndex]; ++pos) {
+	if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
+	  while ((pointer < coords.size()) && (coords[pointer] == mapIdx)) {
+	    mapToGenomic.insert(std::make_pair(coords[pointer], pos));
+	    ++pointer;
+	  }
+	  ++mapIdx;
 	}
-	++mapIdx;
       }
     }
 
     // Translate peaks into genomic space
     for(uint32_t i = 0; i < peaks.size(); ++i) {
-      double rdsupport = std::min(peakCoords[peaks[i].first].second, peakCoords[peaks[i].second].second);
+      double rdsupport = std::min(peakCoords[peaks[i].first].peakHeight, peakCoords[peaks[i].second].peakHeight);
+      double penalty = std::max(peakCoords[peaks[i].first].penalty, peakCoords[peaks[i].second].penalty);
       double covsum = 0;
       double expcov = 0;
-      for(uint32_t k = peakCoords[peaks[i].first].first; k < peakCoords[peaks[i].second].first; ++k) {
+      for(uint32_t k = peakCoords[peaks[i].first].pos; k < peakCoords[peaks[i].second].pos; ++k) {
 	covsum += mapcov[k];
 	expcov += gcbias[mapGcContent[k]].coverage;
       }
       double cn = c.ploidy * covsum / expcov;
-      int32_t svSize = mapToGenomic[peakCoords[peaks[i].second].first] - mapToGenomic[peakCoords[peaks[i].first].first];
+      int32_t svSize = mapToGenomic[peakCoords[peaks[i].second].pos] - mapToGenomic[peakCoords[peaks[i].first].pos];
+      int32_t mapSize = peakCoords[peaks[i].second].pos - peakCoords[peaks[i].first].pos;
+      double mappableFrac = (double) mapSize / (double) svSize;
       if (svSize >= (int32_t) c.minCnvSize) {
-	cnvCalls.push_back(CNV(refIndex, mapToGenomic[peakCoords[peaks[i].first].first], mapToGenomic[peakCoords[peaks[i].second].first], mapToGenomic[ciCoords[peaks[i].first].first], mapToGenomic[ciCoords[peaks[i].first].second], mapToGenomic[ciCoords[peaks[i].second].first], mapToGenomic[ciCoords[peaks[i].second].second], cn, rdsupport));
+	cnvCalls.push_back(CNV(refIndex, mapToGenomic[peakCoords[peaks[i].first].pos], mapToGenomic[peakCoords[peaks[i].second].pos], mapToGenomic[peakCoords[peaks[i].first].cilow], mapToGenomic[peakCoords[peaks[i].first].cihigh], mapToGenomic[peakCoords[peaks[i].second].cilow], mapToGenomic[peakCoords[peaks[i].second].cihigh], cn, rdsupport, penalty, mappableFrac));
       }
     }
   }
