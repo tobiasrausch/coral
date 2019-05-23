@@ -11,15 +11,20 @@ x = read.table(args[1], header=T)
 if (sum(x$chr %in% chrNamesLong) > sum(x$chr %in% chrNamesShort)) { chrs = chrNamesLong; } else { chrs = chrNamesShort; }
 x = x[x$chr %in% chrs,]
 x$chr = factor(x$chr, levels=chrs)
-seg = read.table(args[2], header=T)
-seg = seg[seg$chr %in% chrs,]
-seg$chr = factor(seg$chr, levels=chrs)
-plotBaf = T
-if (mean(is.na(x[,7])) > 0.5) { plotBaf = F; }
+seg = data.frame()
+if (length(args) > 1) {
+ seg = read.table(args[2], header=T)
+ seg = seg[seg$chr %in% chrs,]
+ seg$chr = factor(seg$chr, levels=chrs)
+ plotBaf = T
+ if (mean(is.na(x[,7])) > 0.5) { plotBaf = F; }
+} else {
+ plotBaf = F
+}
 
 p = ggplot(data=x, aes(x=start, y=x[,6]))
 p = p + geom_point(pch=21, size=0.5)
-p = p + geom_segment(data = seg, aes(x=start, xend=end, y=cn, yend=cn), color="lightblue")
+if (nrow(seg)) { p = p + geom_segment(data = seg, aes(x=start, xend=end, y=cn, yend=cn), color="lightblue"); }
 p = p + xlab("Chromosome")
 p = p + ylab("Copy-number")
 p = p + scale_x_continuous(labels=comma)
@@ -30,7 +35,7 @@ if (plotBaf) {
  q = ggplot(data=x, aes(x=start, y=x[,7]))
  q = q + geom_point(pch=21, size=0.5)
  q = q + ylab("Obs / Exp MAF of het. SNPs") + xlab("Chromosome")
- q = q + geom_segment(data = seg, aes(x=start, xend=end, y=maf, yend=maf), color="lightblue")
+ if (nrow(seg)) { q = q + geom_segment(data = seg, aes(x=start, xend=end, y=maf, yend=maf), color="lightblue"); }
  q = q + scale_x_continuous(labels=comma)
  q = q + facet_grid(. ~ chr, scales="free_x", space="free_x")
  q = q + ylim(0,1.5)
@@ -51,7 +56,7 @@ for(chrname in unique(x$chr)) {
  local = seg[seg$chr == chrname,]
  p = ggplot(data=sub, aes(x=start, y=sub[,6]))
  p = p + geom_point(pch=21, size=0.5)
- p = p + geom_segment(data = local, aes(x=start, xend=end, y=cn, yend=cn), color="lightblue")
+ if (nrow(local)) { p = p + geom_segment(data = local, aes(x=start, xend=end, y=cn, yend=cn), color="lightblue"); }
  p = p + ylab("Copy-number") + xlab(chrname)
  p = p + scale_x_continuous(labels=comma, breaks = scales::pretty_breaks(n=20))
  p = p + ylim(0,8)

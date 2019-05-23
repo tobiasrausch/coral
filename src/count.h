@@ -69,6 +69,7 @@ namespace coralns
     float uniqueToTotalCovRatio;
     float fracWindow;
     float fragmentUnique;
+    float controlMaf;
     std::string sampleName;
     std::string outprefix;
     boost::filesystem::path genome;
@@ -736,13 +737,14 @@ namespace coralns
     typedef std::vector<TVariantSupport> TGenomicVariants;
     TGenomicVariants gvar(c.nchr, TVariantSupport());
     TGenomicVariants cvar(c.nchr, TVariantSupport());
+    c.controlMaf = 0.5;
     if (vm.count("vcffile")) {
       if (c.hasControlFile) {
 	baf(c, true, cvar);  // Het. germline variants
-	baf(c, false, cvar, gvar);
+	c.controlMaf = baf(c, false, cvar, gvar);
       } else {
 	// Tumor-only
-	baf(c, false, gvar);
+	c.controlMaf = baf(c, false, gvar);
       }
     }
 

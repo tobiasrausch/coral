@@ -68,8 +68,11 @@ namespace coralns {
   }
   
   template<typename TConfig, typename TGenomicVariants>
-  inline int32_t
+  inline double
   baf(TConfig const& c, bool const runControl, TGenomicVariants& cvar, TGenomicVariants& gvar) {
+    double maf = 0;
+    uint32_t mafCount = 0;
+    
     // Open BAM file
     samFile* samfile;
     if (runControl) samfile = sam_open(c.controlFile.string().c_str(), "r");
@@ -195,13 +198,25 @@ namespace coralns {
 	    double minHet = 0.1;
 	    if (c.hasControlFile) minHet = 0.3; // More stringent because control available
 	    uint32_t minSupport = std::max((int32_t) std::ceil(minHet * (double) totalcov), 2);
-	    if ((altS[i] >= minSupport) && (refS[i] >= minSupport)) gvar[refIndex].push_back(BiallelicSupport(pv[i].pos, refS[i], altS[i]));
+	    if ((altS[i] >= minSupport) && (refS[i] >= minSupport)) {
+	      double vaf = (double) altS[i] / (double) (altS[i] + refS[i]);
+	      if (vaf < 0.5) maf += vaf;
+	      else maf += (1 - vaf);
+	      gvar[refIndex].push_back(BiallelicSupport(pv[i].pos, refS[i], altS[i]));
+	      ++mafCount;
+	    }
 	  }
 	} else {
 	  // Matched control available
 	  // Make sure variant is present in control het. variant set
 	  typename TGenomicVariants::value_type::const_iterator vIt = std::lower_bound(cvar[refIndex].begin(), cvar[refIndex].end(), BiallelicSupport(pv[i].pos), SortVariants<BiallelicSupport>());
-	  if ((vIt != cvar[refIndex].end()) && (vIt->pos == pv[i].pos)) gvar[refIndex].push_back(BiallelicSupport(pv[i].pos, refS[i], altS[i]));
+	  if ((vIt != cvar[refIndex].end()) && (vIt->pos == pv[i].pos)) {
+	    double vaf = (double) altS[i] / (double) (altS[i] + refS[i]);
+	    if (vaf < 0.5) maf += vaf;
+	    else maf += (1 - vaf);
+	    gvar[refIndex].push_back(BiallelicSupport(pv[i].pos, refS[i], altS[i]));
+	    ++mafCount;
+	  }
 	}
       }
 
@@ -219,13 +234,13 @@ namespace coralns {
     bam_hdr_destroy(hdr);
     hts_idx_destroy(idx);
     sam_close(samfile);
-    
-    return 0;
+
+    return (double) maf /  (double) mafCount;
   }
 
 
   template<typename TConfig, typename TGenomicVariants>
-  inline int32_t
+  inline double
   baf(TConfig const& c, bool const runControl, TGenomicVariants& gvar) {
     TGenomicVariants cvar;
     return baf(c, runControl, cvar, gvar);

@@ -171,6 +171,7 @@ namespace coralns
     bcf_hdr_append(hdr, "##INFO=<ID=SRR,Number=1,Type=Integer,Description=\"Split-read support right breakpoint\">");
     bcf_hdr_append(hdr, "##INFO=<ID=NSNPS,Number=1,Type=Integer,Description=\"Number of SNPs within the CNV region\">");
     bcf_hdr_append(hdr, "##INFO=<ID=MAF,Number=1,Type=Float,Description=\"Average MAF of SNPs contained in the CNV region\">");
+    bcf_hdr_append(hdr, "##INFO=<ID=OEMAF,Number=1,Type=Float,Description=\"Observed/Expected ratio of SNP MAF\">");
     bcf_hdr_append(hdr, "##INFO=<ID=PTY,Number=1,Type=Float,Description=\"CN penalty of CNV and boundary regions\">");
     bcf_hdr_append(hdr, "##INFO=<ID=MPB,Number=1,Type=Float,Description=\"Mappable fraction\">");
     bcf_hdr_append(hdr, "##INFO=<ID=RDS,Number=1,Type=Float,Description=\"Read-depth increase/decrease support\">");
@@ -247,6 +248,11 @@ namespace coralns
 	float tmpf = 0.5;
 	if (cnvCalls[i].nsnps > 0) tmpf = (float) (cnvCalls[i].maf / (double) cnvCalls[i].nsnps);
 	bcf_update_info_float(hdr, rec, "MAF", &tmpf, 1);
+	tmpf = 1;
+	if ((cnvCalls[i].nsnps > 0) && (c.controlMaf > 0)) {
+	  tmpf = (float) (((double) (cnvCalls[i].maf / (double) cnvCalls[i].nsnps)) / (double) c.controlMaf);
+	}
+	bcf_update_info_float(hdr, rec, "OEMAF", &tmpf, 1);
 	int32_t ciend[2];
 	ciend[0] = cnvCalls[i].ciendlow - cnvCalls[i].end;
 	if (ciend[0] >= 0) ciend[0] = -1;

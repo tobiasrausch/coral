@@ -726,7 +726,7 @@ namespace coralns
       int32_t svSize = mapToGenomic[peakCoords[peaks[i].second].pos] - mapToGenomic[peakCoords[peaks[i].first].pos];
       int32_t mapSize = peakCoords[peaks[i].second].pos - peakCoords[peaks[i].first].pos;
       double mappableFrac = (double) mapSize / (double) svSize;
-      if (svSize >= (int32_t) c.minCnvSize) {
+      if ((svSize >= (int32_t) c.minCnvSize) && (mappableFrac > 0.1)) {
 	cnvCalls.push_back(CNV(refIndex, mapToGenomic[peakCoords[peaks[i].first].pos], mapToGenomic[peakCoords[peaks[i].second].pos], mapToGenomic[peakCoords[peaks[i].first].cilow], mapToGenomic[peakCoords[peaks[i].first].cihigh], mapToGenomic[peakCoords[peaks[i].second].cilow], mapToGenomic[peakCoords[peaks[i].second].cihigh], cn, rdsupport, penalty, mappableFrac));
       }
     }
