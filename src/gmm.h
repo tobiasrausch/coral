@@ -177,7 +177,7 @@ namespace coralns
     bcf_hdr_append(hdr, "##INFO=<ID=SVTYPE,Number=1,Type=String,Description=\"Type of structural variant\">");
     bcf_hdr_append(hdr, "##INFO=<ID=SVMETHOD,Number=1,Type=String,Description=\"Type of approach used to detect SV\">");
     bcf_hdr_append(hdr, "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">");
-    bcf_hdr_append(hdr, "##FORMAT=<ID=CNL,Number=G,Type=Float,Description=\"Log10-scaled copy-number likelihoods for CN0, CN1, CN2, ..., CN9\">");
+    bcf_hdr_append(hdr, "##FORMAT=<ID=CNL,Number=.,Type=Float,Description=\"Log10-scaled copy-number likelihoods for CN0, CN1, CN2, ..., CN9\">");
     bcf_hdr_append(hdr, "##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotype Quality\">");
     bcf_hdr_append(hdr, "##FORMAT=<ID=FT,Number=1,Type=String,Description=\"Per-sample genotype filter\">");
     bcf_hdr_append(hdr, "##FORMAT=<ID=CN,Number=1,Type=Integer,Description=\"Read-depth based copy-number estimate for autosomal sites\">");

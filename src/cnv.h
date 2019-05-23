@@ -194,7 +194,6 @@ namespace coralns
       typename TSplits::const_iterator it = std::lower_bound(splitBp.begin(), splitBp.end(), ps);
       ps = std::make_pair(ed, 9999999);
       typename TSplits::const_iterator itE = std::upper_bound(splitBp.begin(), splitBp.end(), ps);
-      std::cerr << "Pos:" << st << ',' << ed << std::endl;
       for(;it!=itE;++it) {
 	if ((it->second >= 2) && (it->second > cnvCalls[i].srleft)) {
 	  cnvCalls[i].srleft = it->second;
