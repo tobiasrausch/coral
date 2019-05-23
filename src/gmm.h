@@ -130,7 +130,8 @@ namespace coralns
       denominator += bl.phred2prob[pl[geno]];
     }
     if (plSum > 0) {
-      FLP likelihood = (FLP) std::log10(1-1/denominator);
+      FLP likelihood = 0;
+      if (denominator > 1) likelihood = (FLP) std::log10(1-1/denominator);
       likelihood = (likelihood > SMALLEST_GL) ? likelihood : SMALLEST_GL;
       gqval[0] = (int32_t) boost::math::round(-10 * likelihood);
     } else gqval[0] = 0;
@@ -278,6 +279,7 @@ namespace coralns
 
 	// Compute GLs
 	_computeGLs(bl, sda, cnvCalls[i], gls, gqval, gts);
+	if (gqval[0] == 0) cnest[0] = -1;
 	
 	// Genotype filter
 	if (gqval[0] < 15) ftarr[0] = "LowQual";

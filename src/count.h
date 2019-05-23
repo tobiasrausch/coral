@@ -341,7 +341,7 @@ namespace coralns
       breakpointRefinement(splitBp, cnvCalls);
       mafAnnotation(gvar[refIndex], cnvCalls);
       genotypeCNVs(c, sda, cnvCalls);
-      
+
       // BED File (target intervals)
       if (c.hasBedFile) {
 	// Adaptive Window Length
