@@ -336,8 +336,9 @@ namespace coralns
       // Call & genotype CNVs
       std::vector<CNV> cnvCalls;
       callCNVs(c, gcbound, gcContent, uniqContent, gcbias, cov, hdr, refIndex, cnvCalls);
-      breakpointRefinement(splitBp, cnvCalls);
       std::sort(cnvCalls.begin(), cnvCalls.end(), SortCNVs<CNV>());
+      breakpointRefinement(splitBp, cnvCalls);
+      mafAnnotation(gvar[refIndex], cnvCalls);
       genotypeCNVs(c, sda, cnvCalls);
       
       // BED File (target intervals)

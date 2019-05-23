@@ -58,12 +58,14 @@ namespace coralns
     int32_t ciendhigh;
     uint32_t srleft;
     uint32_t srright;
+    uint32_t nsnps;
     float cn;
     float rdsupport;
     float penalty;
     float mappable;
+    double maf;
     
-  CNV(int32_t const c, int32_t const s, int32_t const e, int32_t const cil, int32_t const cih, int32_t const cel, int32_t ceh, float const estcn, float const sp, float const pty, float const mp) : chr(c), start(s), end(e), ciposlow(cil), ciposhigh(cih), ciendlow(cel), ciendhigh(ceh), srleft(0), srright(0), cn(estcn), rdsupport(sp), penalty(pty), mappable(mp) {}
+  CNV(int32_t const c, int32_t const s, int32_t const e, int32_t const cil, int32_t const cih, int32_t const cel, int32_t ceh, float const estcn, float const sp, float const pty, float const mp) : chr(c), start(s), end(e), ciposlow(cil), ciposhigh(cih), ciendlow(cel), ciendhigh(ceh), srleft(0), srright(0), nsnps(0), cn(estcn), rdsupport(sp), penalty(pty), mappable(mp), maf(0) {}
   };
 
     struct PeakInfo {
@@ -214,7 +216,29 @@ namespace coralns
       }
     }
   }
-  
+
+  inline void
+  mafAnnotation(std::vector<BiallelicSupport> const& gvar, std::vector<CNV>& cnvCalls) {
+    typedef std::vector<BiallelicSupport> TSnps;
+    for(uint32_t i = 0; i < cnvCalls.size(); ++i) {
+      BiallelicSupport st(cnvCalls[i].start);
+      BiallelicSupport ed(cnvCalls[i].end);
+      TSnps::const_iterator it = std::lower_bound(gvar.begin(), gvar.end(), st, SortVariants<BiallelicSupport>());
+      TSnps::const_iterator itE = std::lower_bound(gvar.begin(), gvar.end(), ed, SortVariants<BiallelicSupport>());
+      for(;it!=itE;++it) {
+	if (it->ref + it->alt > 0) {
+	  double baf_target = (double) it->alt / (double) (it->ref + it->alt);
+	  double maf = baf_target;
+	  if (baf_target > 0.5) maf = 1 - baf_target;
+	  cnvCalls[i].maf += maf;
+	  ++cnvCalls[i].nsnps;
+	}
+      }
+    }
+  }
+
+
+    
 
   template<typename TConfig, typename TGcBias, typename TCoverage>
   inline void

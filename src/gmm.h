@@ -169,6 +169,8 @@ namespace coralns
     bcf_hdr_append(hdr, "##INFO=<ID=END,Number=1,Type=Integer,Description=\"End position of the CNV\">");
     bcf_hdr_append(hdr, "##INFO=<ID=SRL,Number=1,Type=Integer,Description=\"Split-read support left breakpoint\">");
     bcf_hdr_append(hdr, "##INFO=<ID=SRR,Number=1,Type=Integer,Description=\"Split-read support right breakpoint\">");
+    bcf_hdr_append(hdr, "##INFO=<ID=NSNPS,Number=1,Type=Integer,Description=\"Number of SNPs within the CNV region\">");
+    bcf_hdr_append(hdr, "##INFO=<ID=MAF,Number=1,Type=Float,Description=\"Average MAF of SNPs contained in the CNV region\">");
     bcf_hdr_append(hdr, "##INFO=<ID=PTY,Number=1,Type=Float,Description=\"CN penalty of CNV and boundary regions\">");
     bcf_hdr_append(hdr, "##INFO=<ID=MPB,Number=1,Type=Float,Description=\"Mappable fraction\">");
     bcf_hdr_append(hdr, "##INFO=<ID=RDS,Number=1,Type=Float,Description=\"Read-depth increase/decrease support\">");
@@ -240,6 +242,11 @@ namespace coralns
 	bcf_update_info_int32(hdr, rec, "SRL", &tmpi, 1);
 	tmpi = cnvCalls[i].srright;
 	bcf_update_info_int32(hdr, rec, "SRR", &tmpi, 1);
+	tmpi = cnvCalls[i].nsnps;
+	bcf_update_info_int32(hdr, rec, "NSNPS", &tmpi, 1);
+	float tmpf = 0.5;
+	if (cnvCalls[i].nsnps > 0) tmpf = (float) (cnvCalls[i].maf / (double) cnvCalls[i].nsnps);
+	bcf_update_info_float(hdr, rec, "MAF", &tmpf, 1);
 	int32_t ciend[2];
 	ciend[0] = cnvCalls[i].ciendlow - cnvCalls[i].end;
 	if (ciend[0] >= 0) ciend[0] = -1;
@@ -252,7 +259,7 @@ namespace coralns
 	if (cipos[1] <= 0) cipos[1] = 1;
 	bcf_update_info_int32(hdr, rec, "CIPOS", cipos, 2);
 	bcf_update_info_int32(hdr, rec, "CIEND", ciend, 2);
-      	float tmpf = cnvCalls[i].penalty;
+      	tmpf = cnvCalls[i].penalty;
 	bcf_update_info_float(hdr, rec, "PTY", &tmpf, 1);
 	tmpf = cnvCalls[i].mappable;
 	bcf_update_info_float(hdr, rec, "MPB", &tmpf, 1);
