@@ -56,12 +56,14 @@ namespace coralns
     int32_t ciposhigh;
     int32_t ciendlow;
     int32_t ciendhigh;
+    uint32_t srleft;
+    uint32_t srright;
     float cn;
     float rdsupport;
     float penalty;
     float mappable;
     
-  CNV(int32_t const c, int32_t const s, int32_t const e, int32_t const cil, int32_t const cih, int32_t const cel, int32_t ceh, float const estcn, float const sp, float const pty, float const mp) : chr(c), start(s), end(e), ciposlow(cil), ciposhigh(cih), ciendlow(cel), ciendhigh(ceh), cn(estcn), rdsupport(sp), penalty(pty), mappable(mp) {}
+  CNV(int32_t const c, int32_t const s, int32_t const e, int32_t const cil, int32_t const cih, int32_t const cel, int32_t ceh, float const estcn, float const sp, float const pty, float const mp) : chr(c), start(s), end(e), ciposlow(cil), ciposhigh(cih), ciendlow(cel), ciendhigh(ceh), srleft(0), srright(0), cn(estcn), rdsupport(sp), penalty(pty), mappable(mp) {}
   };
 
     struct PeakInfo {
@@ -181,11 +183,45 @@ namespace coralns
   }
 
 
+  template<typename TSplits>
+  inline void
+  breakpointRefinement(TSplits const& splitBp, std::vector<CNV>& cnvCalls) {
+    typedef typename TSplits::value_type TPosSupport;
+    for(uint32_t i = 0; i < cnvCalls.size(); ++i) {
+      uint32_t st = cnvCalls[i].ciposlow;
+      uint32_t ed = cnvCalls[i].ciposhigh;
+      TPosSupport ps = std::make_pair(st, 0);
+      typename TSplits::const_iterator it = std::lower_bound(splitBp.begin(), splitBp.end(), ps);
+      ps = std::make_pair(ed, 9999999);
+      typename TSplits::const_iterator itE = std::upper_bound(splitBp.begin(), splitBp.end(), ps);
+      std::cerr << "Pos:" << st << ',' << ed << std::endl;
+      for(;it!=itE;++it) {
+	if ((it->second >= 2) && (it->second > cnvCalls[i].srleft)) {
+	  cnvCalls[i].srleft = it->second;
+	  cnvCalls[i].start = it->first;
+	}
+      }
+      st = cnvCalls[i].ciendlow;
+      ed = cnvCalls[i].ciendhigh;
+      ps = std::make_pair(st, 0);
+      it = std::lower_bound(splitBp.begin(), splitBp.end(), ps);
+      ps = std::make_pair(ed, 9999999);
+      itE = std::upper_bound(splitBp.begin(), splitBp.end(), ps);
+      for(;it!=itE;++it) {
+	if ((it->second >= 2) && (it->second > cnvCalls[i].srright)) {
+	  cnvCalls[i].srright = it->second;
+	  cnvCalls[i].end = it->first;
+	}
+      }
+    }
+  }
+  
+
   template<typename TConfig, typename TGcBias, typename TCoverage>
   inline void
     callCNVs(TConfig const& c, std::pair<uint32_t, uint32_t> const& gcbound, std::vector<uint16_t> const& gcContent, std::vector<uint16_t> const& uniqContent, TGcBias const& gcbias, TCoverage const& cov, bam_hdr_t const* hdr, int32_t const refIndex, std::vector<CNV>& cnvCalls) {
 
-    uint32_t rdThreshold = 5;
+    uint32_t rdThreshold = 3;
     
     // Shrink to mappable pos
     int32_t mappable = 0;

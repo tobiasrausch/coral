@@ -167,6 +167,8 @@ namespace coralns
     bcf_hdr_append(hdr, "##INFO=<ID=CIEND,Number=2,Type=Integer,Description=\"Confidence interval around END\">");
     bcf_hdr_append(hdr, "##INFO=<ID=CIPOS,Number=2,Type=Integer,Description=\"Confidence interval around POS\">");
     bcf_hdr_append(hdr, "##INFO=<ID=END,Number=1,Type=Integer,Description=\"End position of the CNV\">");
+    bcf_hdr_append(hdr, "##INFO=<ID=SRL,Number=1,Type=Integer,Description=\"Split-read support left breakpoint\">");
+    bcf_hdr_append(hdr, "##INFO=<ID=SRR,Number=1,Type=Integer,Description=\"Split-read support right breakpoint\">");
     bcf_hdr_append(hdr, "##INFO=<ID=PTY,Number=1,Type=Float,Description=\"CN penalty of CNV and boundary regions\">");
     bcf_hdr_append(hdr, "##INFO=<ID=MPB,Number=1,Type=Float,Description=\"Mappable fraction\">");
     bcf_hdr_append(hdr, "##INFO=<ID=RDS,Number=1,Type=Float,Description=\"Read-depth increase/decrease support\">");
@@ -202,21 +204,6 @@ namespace coralns
       std::vector<std::string> ftarr;
       ftarr.resize(bcf_hdr_nsamples(hdr));
 
-
-      for(uint32_t i = 0; i < cnvCalls.size(); ++i) {
-	std::cerr << bamhd->target_name[cnvCalls[i].chr] << '\t' << cnvCalls[i].start << '\t' << cnvCalls[i].end << '\t' << "CN=" << cnvCalls[i].cn << ";CIPOS=" << cnvCalls[i].ciposlow << "," << cnvCalls[i].ciposhigh << ";CIEND=" << cnvCalls[i].ciendlow << "," << cnvCalls[i].ciendhigh << ",RDSUPPORT=" << cnvCalls[i].rdsupport << ",PENALTY=" << cnvCalls[i].penalty << ",MAPPABLE=" << cnvCalls[i].mappable << std::endl;
-	/*
-	for(uint32_t k = 0; k < splitBp.size(); ++k) {
-	  if ((cnvCalls[i].ciposlow < splitBp[k].first) && (splitBp[k].first < cnvCalls[i].ciposhigh)) {
-	    std::cerr << splitBp[k].first << ',' << splitBp[k].second << std::endl;
-	  }
-	  if ((cnvCalls[i].ciendlow < splitBp[k].first) && (splitBp[k].first < cnvCalls[i].ciendhigh)) {
-	    std::cerr << splitBp[k].first << ',' << splitBp[k].second << std::endl;
-	  }
-	}
-	*/
-      }
-      
       // Iterate all structural variants
       bcf1_t *rec = bcf_init();
       for(uint32_t i = 0; i < cnvCalls.size(); ++i) {
@@ -240,8 +227,8 @@ namespace coralns
 	bcf_update_filter(hdr, rec, &tmpi, 1);
       
 	// Add INFO fields
-	//bcf_update_info_flag(hdr, rec, "PRECISE", NULL, 1);
-	bcf_update_info_flag(hdr, rec, "IMPRECISE", NULL, 1);
+	if ((cnvCalls[i].srleft > 0) && (cnvCalls[i].srright > 0)) bcf_update_info_flag(hdr, rec, "PRECISE", NULL, 1);
+	else bcf_update_info_flag(hdr, rec, "IMPRECISE", NULL, 1);	
 	std::string svt("CNV");
 	bcf_update_info_string(hdr, rec, "SVTYPE", svt.c_str());
 	std::string coralVersion("EMBL.CORALv");
@@ -249,6 +236,10 @@ namespace coralns
 	bcf_update_info_string(hdr,rec, "SVMETHOD", coralVersion.c_str());
 	tmpi = svEndPos;
 	bcf_update_info_int32(hdr, rec, "END", &tmpi, 1);
+	tmpi = cnvCalls[i].srleft;
+	bcf_update_info_int32(hdr, rec, "SRL", &tmpi, 1);
+	tmpi = cnvCalls[i].srright;
+	bcf_update_info_int32(hdr, rec, "SRR", &tmpi, 1);
 	int32_t ciend[2];
 	ciend[0] = cnvCalls[i].ciendlow - cnvCalls[i].end;
 	if (ciend[0] >= 0) ciend[0] = -1;
