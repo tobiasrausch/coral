@@ -106,7 +106,10 @@ namespace coralns
 
     // Estimate SD
     SDAggregator sda(c.minCnvSize);
-    
+
+    // CNV calls
+    std::vector<CNV> cnvCalls;
+	  
     // Parse BAM file
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Count fragments" << std::endl;
@@ -334,13 +337,11 @@ namespace coralns
 	++widx;
       }
       
-      // Call & genotype CNVs
-      std::vector<CNV> cnvCalls;
+      // Call CNVs
       callCNVs(c, gcbound, gcContent, uniqContent, gcbias, cov, hdr, refIndex, cnvCalls);
       std::sort(cnvCalls.begin(), cnvCalls.end(), SortCNVs<CNV>());
-      breakpointRefinement(splitBp, cnvCalls);
-      mafAnnotation(gvar[refIndex], cnvCalls);
-      genotypeCNVs(c, sda, cnvCalls);
+      breakpointRefinement(splitBp, refIndex, cnvCalls);
+      mafAnnotation(gvar[refIndex], refIndex, cnvCalls);
 
       // BED File (target intervals)
       if (c.hasBedFile) {
@@ -532,6 +533,9 @@ namespace coralns
 	}
       }
     }
+
+    // Genotype CNVs
+    genotypeCNVs(c, sda, cnvCalls);
 	  
     // clean-up
     fai_destroy(faiRef);

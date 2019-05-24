@@ -187,9 +187,10 @@ namespace coralns
 
   template<typename TSplits>
   inline void
-  breakpointRefinement(TSplits const& splitBp, std::vector<CNV>& cnvCalls) {
+  breakpointRefinement(TSplits const& splitBp, int32_t const refIndex, std::vector<CNV>& cnvCalls) {
     typedef typename TSplits::value_type TPosSupport;
     for(uint32_t i = 0; i < cnvCalls.size(); ++i) {
+      if (cnvCalls[i].chr != refIndex) continue;
       uint32_t st = cnvCalls[i].ciposlow;
       uint32_t ed = cnvCalls[i].ciposhigh;
       TPosSupport ps = std::make_pair(st, 0);
@@ -218,9 +219,10 @@ namespace coralns
   }
 
   inline void
-  mafAnnotation(std::vector<BiallelicSupport> const& gvar, std::vector<CNV>& cnvCalls) {
+  mafAnnotation(std::vector<BiallelicSupport> const& gvar, int32_t const refIndex, std::vector<CNV>& cnvCalls) {
     typedef std::vector<BiallelicSupport> TSnps;
     for(uint32_t i = 0; i < cnvCalls.size(); ++i) {
+      if (cnvCalls[i].chr != refIndex) continue;
       BiallelicSupport st(cnvCalls[i].start);
       BiallelicSupport ed(cnvCalls[i].end);
       TSnps::const_iterator it = std::lower_bound(gvar.begin(), gvar.end(), st, SortVariants<BiallelicSupport>());
