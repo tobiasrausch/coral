@@ -300,7 +300,7 @@ namespace coralns
       }
 
       // Output BAF
-      for(uint32_t i = 0; i < cvar[refIndex].size(); ++i) {
+      for(uint32_t i = 0; i < gvar[refIndex].size(); ++i) {
 	if (gvar[refIndex][i].ref + gvar[refIndex][i].alt > 0) {
 	  double baf_target = (double) gvar[refIndex][i].alt /	(double) (gvar[refIndex][i].ref + gvar[refIndex][i].alt);
 	  double baf_control = 0.5;
@@ -309,8 +309,7 @@ namespace coralns
 	      baf_control = (double) cvar[refIndex][i].alt / (double) (cvar[refIndex][i].ref + cvar[refIndex][i].alt);
 	    }
 	  }
-	  if (cvar[refIndex][i].pos != gvar[refIndex][i].pos) std::cerr << "Warning: Variant calling positions differ!" << std::endl;
-	  dataOutBaf << std::string(hdr->target_name[refIndex]) << "\t" << cvar[refIndex][i].pos << "\t" << baf_control << "\t" << baf_target << std::endl;
+	  dataOutBaf << std::string(hdr->target_name[refIndex]) << "\t" << gvar[refIndex][i].pos << "\t" << baf_control << "\t" << baf_target << std::endl;
 	}
       }
 

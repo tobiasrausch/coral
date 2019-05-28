@@ -377,7 +377,7 @@ namespace coralns
 	  if (peakCoords[i].peakHeight >= peakThreshold) {
 	    if (((peakCoords[i].pos - peakCoords[lastPeak].pos) >= c.minCnvSize) && (!peakUsed[lastPeak]) && (!peakUsed[i])) {
 	      double covsum = 0;
-	      double expcov = 0;
+	      double expcov = 0.001;
 	      for(uint32_t k = peakCoords[lastPeak].pos; k < peakCoords[i].pos; ++k) {
 		covsum += mapcov[k];
 		expcov += gcbias[mapGcContent[k]].coverage;
@@ -387,7 +387,7 @@ namespace coralns
 		int32_t sw = 5000;
 		int32_t st = std::max(0, (int32_t) (peakCoords[lastPeak].pos) - sw);
 		double covsumLeft = 0;
-		double expcovLeft = 0;
+		double expcovLeft = 0.001;
 		for(uint32_t k = st; k < peakCoords[lastPeak].pos; ++k) {
 		  covsumLeft += mapcov[k];
 		  expcovLeft += gcbias[mapGcContent[k]].coverage;
@@ -396,7 +396,7 @@ namespace coralns
 		if ((boost::math::lround(cnLeft) != boost::math::lround(cn)) && (std::abs(cnLeft - cn) > 0.5)) {
 		  int32_t ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].pos) + sw);
 		  double covsumRight = 0;
-		  double expcovRight = 0;
+		  double expcovRight = 0.001;
 		  for(int32_t k = peakCoords[i].pos; k < ed; ++k) {
 		    covsumRight += mapcov[k];
 		    expcovRight += gcbias[mapGcContent[k]].coverage;
@@ -433,7 +433,7 @@ namespace coralns
 		    peakCoords[lastPeak].penalty = bestOffset;
 		    // Update cn estimate
 		    covsum = 0;
-		    expcov = 0;
+		    expcov = 0.001;
 		    for(uint32_t k = peakCoords[lastPeak].pos; k < peakCoords[i].pos; ++k) {
 		      covsum += mapcov[k];
 		      expcov += gcbias[mapGcContent[k]].coverage;
@@ -443,7 +443,7 @@ namespace coralns
 		    st = std::max(0, (int32_t) (peakCoords[lastPeak].pos) - sw);
 		    mi = peakCoords[lastPeak].pos;
 		    covsumLeft = 0;
-		    expcovLeft = 0;
+		    expcovLeft = 0.001;
 		    for(uint32_t k = st; k < mi; ++k) {
 		      covsumLeft += mapcov[k];
 		      expcovLeft += gcbias[mapGcContent[k]].coverage;
@@ -472,7 +472,7 @@ namespace coralns
 		    peakCoords[lastPeak].penalty = bestOffset;
 		    // Update cn estimate
 		    covsum = 0;
-		    expcov = 0;
+		    expcov = 0.001;
 		    for(uint32_t k = peakCoords[lastPeak].pos; k < peakCoords[i].pos; ++k) {
 		      covsum += mapcov[k];
 		      expcov += gcbias[mapGcContent[k]].coverage;
@@ -504,7 +504,7 @@ namespace coralns
 		    peakCoords[i].penalty = bestOffset;
 		    // Update cn estimate
 		    covsum = 0;
-		    expcov = 0;
+		    expcov = 0.001;
 		    for(uint32_t k = peakCoords[lastPeak].pos; k < peakCoords[i].pos; ++k) {
 		      covsum += mapcov[k];
 		      expcov += gcbias[mapGcContent[k]].coverage;
@@ -515,7 +515,7 @@ namespace coralns
 		    ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].pos) + sw);
 		    mi = peakCoords[i].pos;
 		    covsumRight = 0;
-		    expcovRight = 0;
+		    expcovRight = 0.001;
 		    for(int32_t k = mi; k < ed; ++k) {
 		      covsumRight += mapcov[k];
 		      expcovRight += gcbias[mapGcContent[k]].coverage;
@@ -546,7 +546,7 @@ namespace coralns
 		    // Adjust confidence interval
 		    // Update cn estimate
 		    covsum = 0;
-		    expcov = 0;
+		    expcov = 0.001;
 		    for(uint32_t k = peakCoords[lastPeak].pos; k < peakCoords[i].pos; ++k) {
 		      covsum += mapcov[k];
 		      expcov += gcbias[mapGcContent[k]].coverage;
@@ -556,7 +556,7 @@ namespace coralns
 		    st = std::max(0, (int32_t) (peakCoords[lastPeak].pos) - sw);
 		    mi = peakCoords[lastPeak].pos;
 		    covsumLeft = 0;
-		    expcovLeft = 0;
+		    expcovLeft = 0.001;
 		    for(uint32_t k = st; k < mi; ++k) {
 		      covsumLeft += mapcov[k];
 		      expcovLeft += gcbias[mapGcContent[k]].coverage;
@@ -579,7 +579,7 @@ namespace coralns
 		    peakCoords[lastPeak].cilow = mi;
 		    // Update cn estimate
 		    covsum = 0;
-		    expcov = 0;
+		    expcov = 0.001;
 		    for(uint32_t k = peakCoords[lastPeak].pos; k < peakCoords[i].pos; ++k) {
 		      covsum += mapcov[k];
 		      expcov += gcbias[mapGcContent[k]].coverage;
@@ -589,7 +589,7 @@ namespace coralns
 		    st = std::max(0, (int32_t) (peakCoords[lastPeak].pos) - sw);
 		    mi = peakCoords[lastPeak].pos;
 		    covsumLeft = 0;
-		    expcovLeft = 0;
+		    expcovLeft = 0.001;
 		    for(uint32_t k = st; k < mi; ++k) {
 		      covsumLeft += mapcov[k];
 		      expcovLeft += gcbias[mapGcContent[k]].coverage;
@@ -612,7 +612,7 @@ namespace coralns
 		    peakCoords[lastPeak].cihigh = mi;
 		    // Update cn estimate
 		    covsum = 0;
-		    expcov = 0;
+		    expcov = 0.001;
 		    for(uint32_t k = peakCoords[lastPeak].pos; k < peakCoords[i].pos; ++k) {
 		      covsum += mapcov[k];
 		      expcov += gcbias[mapGcContent[k]].coverage;
@@ -623,7 +623,7 @@ namespace coralns
 		    ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].pos) + sw);
 		    mi = peakCoords[i].pos;
 		    covsumRight = 0;
-		    expcovRight = 0;
+		    expcovRight = 0.001;
 		    for(int32_t k = mi; k < ed; ++k) {
 		      covsumRight += mapcov[k];
 		      expcovRight += gcbias[mapGcContent[k]].coverage;
@@ -646,7 +646,7 @@ namespace coralns
 		    peakCoords[i].cilow = mi;
 		    // Update cn estimate
 		    covsum = 0;
-		    expcov = 0;
+		    expcov = 0.001;
 		    for(uint32_t k = peakCoords[lastPeak].pos; k < peakCoords[i].pos; ++k) {
 		      covsum += mapcov[k];
 		      expcov += gcbias[mapGcContent[k]].coverage;
@@ -656,7 +656,7 @@ namespace coralns
 		    ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].pos) + sw);
 		    mi = peakCoords[i].pos;
 		    covsumRight = 0;
-		    expcovRight = 0;
+		    expcovRight = 0.001;
 		    for(int32_t k = mi; k < ed; ++k) {
 		      covsumRight += mapcov[k];
 		      expcovRight += gcbias[mapGcContent[k]].coverage;
@@ -724,6 +724,7 @@ namespace coralns
 	covsum += mapcov[k];
 	expcov += gcbias[mapGcContent[k]].coverage;
       }
+      if (expcov == 0) continue;
       double cn = c.ploidy * covsum / expcov;
       int32_t svSize = mapToGenomic[peakCoords[peaks[i].second].pos] - mapToGenomic[peakCoords[peaks[i].first].pos];
       int32_t mapSize = peakCoords[peaks[i].second].pos - peakCoords[peaks[i].first].pos;
