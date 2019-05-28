@@ -130,7 +130,7 @@ namespace coralns
     boost::iostreams::filtering_ostream dataOutBaf;
     dataOutBaf.push(boost::iostreams::gzip_compressor());
     dataOutBaf.push(boost::iostreams::file_sink(filename.c_str(), std::ios_base::out | std::ios_base::binary));
-    dataOutBaf << "chr\tpos\t" << c.sampleName << "_control_baf\t" << c.sampleName << "_target_baf" << std::endl;
+    dataOutBaf << "chr\tpos\trefCount\taltCount\t" << c.sampleName << "_control_baf\t" << c.sampleName << "_target_baf" << std::endl;
     
     
     // Iterate chromosomes
@@ -309,7 +309,7 @@ namespace coralns
 	      baf_control = (double) cvar[refIndex][i].alt / (double) (cvar[refIndex][i].ref + cvar[refIndex][i].alt);
 	    }
 	  }
-	  dataOutBaf << std::string(hdr->target_name[refIndex]) << "\t" << gvar[refIndex][i].pos << "\t" << baf_control << "\t" << baf_target << std::endl;
+	  dataOutBaf << std::string(hdr->target_name[refIndex]) << "\t" << gvar[refIndex][i].pos << "\t" << gvar[refIndex][i].ref << "\t" << gvar[refIndex][i].alt << "\t" << baf_control << "\t" << baf_target << std::endl;
 	}
       }
 

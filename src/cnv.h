@@ -401,7 +401,9 @@ namespace coralns
 		    covsumRight += mapcov[k];
 		    expcovRight += gcbias[mapGcContent[k]].coverage;
 		  }
+		  //std::cerr << "B:" << covsumRight << ',' << expcovRight << std::endl;
 		  double cnRight = c.ploidy * covsumRight / expcovRight;
+		  //std::cerr << cnRight << ',' << cn << std::endl;
 		  if ((boost::math::lround(cnRight) != boost::math::lround(cn)) && (std::abs(cnRight -cn) > 0.5)) {
 		    peakUsed[lastPeak] = true;
 		    peakUsed[i] = true;
