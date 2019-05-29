@@ -399,6 +399,7 @@ namespace coralns
 		  double expcovRight = 0.001;
 		  for(int32_t k = peakCoords[i].pos; k < ed; ++k) {
 		    covsumRight += mapcov[k];
+		    //std::cerr << k << ',' << mapGcContent[k] << ',' << gcbias[mapGcContent[k]].coverage << std::endl;
 		    expcovRight += gcbias[mapGcContent[k]].coverage;
 		  }
 		  //std::cerr << "B:" << covsumRight << ',' << expcovRight << std::endl;

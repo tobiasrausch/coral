@@ -130,7 +130,7 @@ namespace coralns
     boost::iostreams::filtering_ostream dataOutBaf;
     dataOutBaf.push(boost::iostreams::gzip_compressor());
     dataOutBaf.push(boost::iostreams::file_sink(filename.c_str(), std::ios_base::out | std::ios_base::binary));
-    dataOutBaf << "chr\tpos\trefCount\taltCount\t" << c.sampleName << "_control_baf\t" << c.sampleName << "_target_baf" << std::endl;
+    dataOutBaf << "chr\tpos\trefCountTarget\taltCountTarget\t" << c.sampleName << "_target_baf\trefCountControl\taltCountControl\t" << c.sampleName << "_control_baf" << std::endl;
     
     
     // Iterate chromosomes
@@ -303,13 +303,14 @@ namespace coralns
       for(uint32_t i = 0; i < gvar[refIndex].size(); ++i) {
 	if (gvar[refIndex][i].ref + gvar[refIndex][i].alt > 0) {
 	  double baf_target = (double) gvar[refIndex][i].alt /	(double) (gvar[refIndex][i].ref + gvar[refIndex][i].alt);
-	  double baf_control = 0.5;
-	  if (c.hasControlFile) {
-	    if (cvar[refIndex][i].ref + cvar[refIndex][i].alt > 0) {
-	      baf_control = (double) cvar[refIndex][i].alt / (double) (cvar[refIndex][i].ref + cvar[refIndex][i].alt);
-	    }
+	  dataOutBaf << std::string(hdr->target_name[refIndex]) << "\t" << gvar[refIndex][i].pos << "\t" << gvar[refIndex][i].ref << "\t" << gvar[refIndex][i].alt << "\t" << baf_target;
+	  if ((c.hasControlFile) && (cvar[refIndex][i].ref + cvar[refIndex][i].alt > 0)) {
+	    double baf_control = (double) cvar[refIndex][i].alt / (double) (cvar[refIndex][i].ref + cvar[refIndex][i].alt);
+	    dataOutBaf << "\t" << cvar[refIndex][i].ref << "\t" << cvar[refIndex][i].alt << "\t" << baf_control;
+	  } else {
+	    dataOutBaf << "\t0\t0\t0.5";
 	  }
-	  dataOutBaf << std::string(hdr->target_name[refIndex]) << "\t" << gvar[refIndex][i].pos << "\t" << gvar[refIndex][i].ref << "\t" << gvar[refIndex][i].alt << "\t" << baf_control << "\t" << baf_target << std::endl;
+	  dataOutBaf << std::endl;
 	}
       }
 
