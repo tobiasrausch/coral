@@ -394,12 +394,12 @@ namespace coralns
 		}
 		double cnLeft = c.ploidy * covsumLeft / expcovLeft;
 		if ((boost::math::lround(cnLeft) != boost::math::lround(cn)) && (std::abs(cnLeft - cn) > 0.5)) {
-		  int32_t ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].pos) + sw);
+		  int32_t ed = std::min(mappable, (int32_t) (peakCoords[i].pos) + sw);
 		  double covsumRight = 0;
 		  double expcovRight = 0.001;
 		  for(int32_t k = peakCoords[i].pos; k < ed; ++k) {
 		    covsumRight += mapcov[k];
-		    //std::cerr << k << ',' << mapGcContent[k] << ',' << gcbias[mapGcContent[k]].coverage << std::endl;
+		    //std::cerr << k << ',' << mapGcContent[k] << ',' << gcbias[mapGcContent[k]].coverage << ',' << expcovRight << std::endl;
 		    expcovRight += gcbias[mapGcContent[k]].coverage;
 		  }
 		  //std::cerr << "B:" << covsumRight << ',' << expcovRight << std::endl;
@@ -515,7 +515,7 @@ namespace coralns
 		    cn = c.ploidy * covsum / expcov;
 		    // Adjust right peak
 		    // Iterate to the right
-		    ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].pos) + sw);
+		    ed = std::min(mappable, (int32_t) (peakCoords[i].pos) + sw);
 		    mi = peakCoords[i].pos;
 		    covsumRight = 0;
 		    expcovRight = 0.001;
@@ -623,7 +623,7 @@ namespace coralns
 		    cn = c.ploidy * covsum / expcov;
 		    // Adjust right confidence interval
 		    // Iterate to the left
-		    ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].pos) + sw);
+		    ed = std::min(mappable, (int32_t) (peakCoords[i].pos) + sw);
 		    mi = peakCoords[i].pos;
 		    covsumRight = 0;
 		    expcovRight = 0.001;
@@ -656,7 +656,7 @@ namespace coralns
 		    }
 		    cn = c.ploidy * covsum / expcov;
 		    // Iterate to the right
-		    ed = std::min((int32_t) hdr->target_len[refIndex], (int32_t) (peakCoords[i].pos) + sw);
+		    ed = std::min(mappable, (int32_t) (peakCoords[i].pos) + sw);
 		    mi = peakCoords[i].pos;
 		    covsumRight = 0;
 		    expcovRight = 0.001;
