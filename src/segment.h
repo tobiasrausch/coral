@@ -64,6 +64,7 @@ namespace coralns
 
   struct SegmentConfig {
     uint32_t k;
+    float ploidy;
     double epsilon;
     double dpthreshold;
     boost::filesystem::path outfile;
@@ -207,7 +208,7 @@ namespace coralns
     boost::iostreams::filtering_ostream dataOutS;
     dataOutS.push(boost::iostreams::gzip_compressor());
     dataOutS.push(boost::iostreams::file_sink(c.outfile.string().c_str(), std::ios_base::out | std::ios_base::binary));
-    dataOutS << "chr\tstart\tend\tcn\tmaf" << std::endl;
+    dataOutS << "chr\tstart\tend\tcn" << std::endl;
     
     // Iterate chromosomes
     for(uint32_t refIndex = 0; refIndex < cnbc.size(); ++refIndex) {
@@ -222,6 +223,7 @@ namespace coralns
       dpseg(c, cnbc[refIndex].sm, res);
 
       // SD undo with 1 * SD
+      /*
       uint32_t newBreakSize = res.kbestjump.size();
       uint32_t oldBreakSize = newBreakSize + 1;
       while (newBreakSize != oldBreakSize) {
@@ -231,6 +233,7 @@ namespace coralns
 	res.kbestjump = finalJumps;
 	newBreakSize = res.kbestjump.size();
       }
+      */
       
       // Smooth signal
       SmoothSignal smoo;
@@ -242,7 +245,10 @@ namespace coralns
       for(uint32_t i = 0; i<smoo.jumps.size(); ++i) {
 	if (i) istart = cnbc[refIndex].itv[smoo.jumps[i-1]+1].first;
 	uint32_t iend = cnbc[refIndex].itv[smoo.jumps[i]].second;
-	dataOutS << cnbc[refIndex].chr << '\t' << istart << '\t' << iend << '\t' << smoo.smooth[i][0] + 2 << '\t' << smoo.smooth[i][1] + 1 << std::endl;
+	double avgCN = 0;
+	for(uint32_t col = 0; col < cnbc[refIndex].cols; ++col) avgCN += smoo.smooth[i][col];
+	avgCN /= (double) cnbc[refIndex].cols;
+	dataOutS << cnbc[refIndex].chr << '\t' << istart << '\t' << iend << '\t' << (avgCN + c.ploidy) << std::endl;
       }
     }
     dataOutS.pop();
@@ -285,8 +291,7 @@ namespace coralns
 	    if (nbc.chr != chrName) {
 	      if ((nbc.cols) && (nbc.rows)) cnbc.push_back(nbc);
 	      nbc.chr = chrName;
-	      //nbc.cols = col;
-	      nbc.cols = 2;
+	      nbc.cols = col;
 	      nbc.rows = 0;
 	    }
 	    ++nbc.rows;
@@ -299,14 +304,16 @@ namespace coralns
     if (cnbc.empty()) {
       std::cerr << "Signal matrix format is chr, start, end, signal, ..." << std::endl;
       return 1;
+    } else {
+      for (uint32_t i = 0; i < cnbc.size(); ++i) {
+	std::cout << "Matrix dimensions for " << cnbc[i].chr << " are: " << cnbc[i].rows << "x" << cnbc[i].cols << std::endl;
+      }
     }
-
 
     typedef NormalizedBinCounts::TPrecision TPrecision;
     // Parse signal matrix
     uint32_t refIndex = 0;
-    TPrecision lastCN = 0;
-    TPrecision lastMAF = 0;
+    std::vector<TPrecision> lastCN(cnbc[refIndex].cols, 0);
     cnbc[refIndex].sm.resize(boost::extents[cnbc[refIndex].rows][cnbc[refIndex].cols]);
     cnbc[refIndex].itv.resize(cnbc[refIndex].rows);
 
@@ -320,8 +327,7 @@ namespace coralns
     while(std::getline(instream, sigdata)) {
       while ((row >= cnbc[refIndex].rows) && (refIndex + 1 < cnbc.size())) {
 	++refIndex;
-	lastCN = 0;
-	lastMAF = 0;
+	for(uint32_t i = 0; i<cnbc[refIndex].cols;++i) lastCN[i] = 0;
 	cnbc[refIndex].sm.resize(boost::extents[cnbc[refIndex].rows][cnbc[refIndex].cols]);
 	cnbc[refIndex].itv.resize(cnbc[refIndex].rows);
 	row = 0;
@@ -336,21 +342,14 @@ namespace coralns
 	  if (tokIter!=tokens.end()) {
 	    if (*tokIter == "start") continue; //header
 	    cnbc[refIndex].itv[row].first = boost::lexical_cast<uint32_t>(*tokIter++);
-	    if (tokIter!=tokens.end()) {
-	      cnbc[refIndex].itv[row].second = boost::lexical_cast<uint32_t>(*tokIter++);
-	      tokIter++; // Mappable bp
-	      std::string count = *tokIter++;
-	      std::string cn = *tokIter++;
-	      std::string maf = *tokIter;
-	      if ((cn == "NaN") || (cn == "NA")) cnbc[refIndex].sm[row][0] = lastCN;
+	    cnbc[refIndex].itv[row].second = boost::lexical_cast<uint32_t>(*tokIter++);
+	    uint32_t colIdx = 0;
+	    for (;tokIter!=tokens.end();++tokIter, ++colIdx) {
+	      std::string cn = *tokIter;
+	      if ((cn == "NaN") || (cn == "NA")) cnbc[refIndex].sm[row][colIdx] = lastCN[colIdx];
 	      else {
-		cnbc[refIndex].sm[row][0] = boost::lexical_cast<TPrecision>(cn) - 2;
-		lastCN = cnbc[refIndex].sm[row][0];
-	      }
-	      if ((maf == "NaN") || (maf == "NA")) cnbc[refIndex].sm[row][1] = lastMAF;
-	      else {
-		cnbc[refIndex].sm[row][1] = boost::lexical_cast<TPrecision>(maf) - 1;
-		lastMAF = cnbc[refIndex].sm[row][1];
+		cnbc[refIndex].sm[row][colIdx] = boost::lexical_cast<TPrecision>(cn) - c.ploidy;
+		lastCN[colIdx] = cnbc[refIndex].sm[row][colIdx];
 	      }
 	    }
 	  }
@@ -359,6 +358,20 @@ namespace coralns
       }
     }
     dataIn.pop();
+
+
+    // Debug
+    /*
+    for(uint32_t refIndex = 0; refIndex < cnbc.size(); ++refIndex) {
+      for(uint32_t row = 0; row < cnbc[refIndex].rows; ++row) {
+	std::cout << cnbc[refIndex].chr << ':';
+	for(uint32_t col = 0; col < cnbc[refIndex].cols; ++col) {
+	  std::cout << cnbc[refIndex].sm[row][col]  << ',';
+	}
+	std::cout << std::endl;
+      }
+    }
+    */
 
     return runSegmentation(c, cnbc);
   }
@@ -371,6 +384,7 @@ namespace coralns
     boost::program_options::options_description generic("Generic options");
     generic.add_options()
       ("help,?", "show help message")
+      ("ploidy,y", boost::program_options::value<float>(&c.ploidy)->default_value(2), "baseline ploidy")
       ("dpthreshold,d", boost::program_options::value<double>(&c.dpthreshold)->default_value(0.5), "DP threshold")
       ("epsilon,e", boost::program_options::value<double>(&c.epsilon)->default_value(1e-9), "epsilon error")
       ("kchange,k", boost::program_options::value<uint32_t>(&c.k)->default_value(300), "change points per chr")

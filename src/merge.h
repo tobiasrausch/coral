@@ -63,65 +63,8 @@ namespace coralns
     std::vector<boost::filesystem::path> countFiles;
   };
 
-  template<typename TCounts>
   inline void
-  collectCounts(MergeConfig const& c, TCounts& counts) {
-    typedef typename TCounts::value_type TGenomicCounts;
-    typedef typename TGenomicCounts::value_type TChrCounts;
-    
-    // Resize counts
-    for(uint32_t file_c = 0; file_c < c.countFiles.size(); ++file_c) {
-      counts[file_c].resize(c.gIntervals.size(), TChrCounts());
-      for(uint32_t refIndex = 0; refIndex < c.gIntervals.size(); ++refIndex) {
-	counts[file_c][refIndex].resize(c.gIntervals[refIndex].size(), NAN_COUNT);
-      }
-    }
-
-    // Fetch all intervals and sample names
-    boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Collect counts" << std::endl;
-    boost::progress_display show_progress( c.countFiles.size() );
-    for(uint32_t i = 0; i < c.countFiles.size(); ++i) {
-      ++show_progress;
-      std::ifstream file(c.countFiles[i].string().c_str(), std::ios_base::in | std::ios_base::binary);
-      boost::iostreams::filtering_streambuf<boost::iostreams::input> dataIn;
-      dataIn.push(boost::iostreams::gzip_decompressor());
-      dataIn.push(file);
-      std::istream instream(&dataIn);
-      std::string line;
-      while(std::getline(instream, line)) {
-	if (line.size()) {
-	  typedef boost::tokenizer< boost::char_separator<char> > Tokenizer;
-	  boost::char_separator<char> sep("\t");
-	  Tokenizer tokens(line, sep);
-	  Tokenizer::iterator tokIter = tokens.begin();
-	  if (tokIter != tokens.end()) {
-	    std::string chrom = *tokIter++;
-	    if (tokIter != tokens.end()) {
-	      if (std::string(*tokIter) == "start") {
-		// Header
-		continue;
-	      }
-	      int32_t start = boost::lexical_cast<int32_t>(*tokIter++);
-	      int32_t end = boost::lexical_cast<int32_t>(*tokIter++);
-	      float countval = boost::lexical_cast<float>(*tokIter++);
-	      float cn = boost::lexical_cast<float>(*tokIter++);
-	      typename MergeConfig::TChrMap::const_iterator cit = c.chrMap.find(chrom);
-	      uint32_t refIndex = cit->second;
-	      typename MergeConfig::TChrIntervals::const_iterator it = c.gIntervals[refIndex].find(std::make_pair(start, end));
-	      if (c.byType == "CN") counts[i][refIndex][it->second] = cn;
-	      else counts[i][refIndex][it->second] = countval;
-	    }
-	  }
-	}
-      }
-      dataIn.pop();
-    }
-  }
-
-  template<typename TCounts>
-  inline void
-  outputCounts(MergeConfig const& c, TCounts const& counts) {
+  collectCounts(MergeConfig const& c) {
     // Open output file
     boost::iostreams::filtering_ostream dataOut;
     dataOut.push(boost::iostreams::gzip_compressor());
@@ -132,25 +75,68 @@ namespace coralns
     for(uint32_t i = 0; i < c.countFiles.size(); ++i) dataOut << "\t" << c.sampleNames[i];
     dataOut << std::endl;
     
-    // Output all counts
+    // Fetch all intervals and sample names
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Output counts" << std::endl;
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Collect counts" << std::endl;
     boost::progress_display show_progress( c.gIntervals.size() );
     for(uint32_t refIndex = 0; refIndex < c.gIntervals.size(); ++refIndex) {
       ++show_progress;
+      typedef std::vector<float> TChrCounts;
+      typedef std::vector<TChrCounts> TFileCounts;
+      TFileCounts counts(c.countFiles.size(), TChrCounts());
+      for(uint32_t i = 0; i < c.countFiles.size(); ++i) {
+	counts[i].resize(c.gIntervals[refIndex].size(), NAN_COUNT);
+	std::ifstream file(c.countFiles[i].string().c_str(), std::ios_base::in | std::ios_base::binary);
+	boost::iostreams::filtering_streambuf<boost::iostreams::input> dataIn;
+	dataIn.push(boost::iostreams::gzip_decompressor());
+	dataIn.push(file);
+	std::istream instream(&dataIn);
+	std::string line;
+	while(std::getline(instream, line)) {
+	  if (line.size()) {
+	    typedef boost::tokenizer< boost::char_separator<char> > Tokenizer;
+	    boost::char_separator<char> sep("\t");
+	    Tokenizer tokens(line, sep);
+	    Tokenizer::iterator tokIter = tokens.begin();
+	    if (tokIter != tokens.end()) {
+	      std::string chrom = *tokIter++;
+	      if (tokIter != tokens.end()) {
+		if (std::string(*tokIter) == "start") {
+		  // Header
+		  continue;
+		}
+		int32_t start = boost::lexical_cast<int32_t>(*tokIter++);
+		int32_t end = boost::lexical_cast<int32_t>(*tokIter++);
+		++tokIter; // mappable positions
+		float countval = boost::lexical_cast<float>(*tokIter++);
+		float cn = boost::lexical_cast<float>(*tokIter++);
+		typename MergeConfig::TChrMap::const_iterator cit = c.chrMap.find(chrom);
+		uint32_t ridx = cit->second;
+		if (ridx != refIndex) continue;
+		typename MergeConfig::TChrIntervals::const_iterator it = c.gIntervals[refIndex].find(std::make_pair(start, end));
+		if (c.byType == "CN") counts[i][it->second] = cn;
+		else counts[i][it->second] = countval;
+	      }
+	    }
+	  }
+	}
+	dataIn.pop();
+      }
+      // Output
       for(MergeConfig::TChrIntervals::const_iterator it = c.gIntervals[refIndex].begin(); it != c.gIntervals[refIndex].end(); ++it) {
 	dataOut << c.refName[refIndex] << '\t' << it->first.first << '\t' << it->first.second;
 	for(uint32_t i = 0; i < c.countFiles.size(); ++i) {
-	  if (counts[i][refIndex][it->second] == NAN_COUNT) dataOut << "\tNaN";
-	  else dataOut << '\t' << counts[i][refIndex][it->second];
+	  if (counts[i][it->second] == NAN_COUNT) dataOut << "\tNaN";
+	  else dataOut << '\t' << counts[i][it->second];
 	}
 	dataOut << std::endl;
       }
     }
+    
     // Close
     dataOut.pop();
   }
-  
+
   int merge(int argc, char **argv) {
     MergeConfig c;
     
@@ -257,12 +243,7 @@ namespace coralns
     }
 
     // Get all values
-    typedef std::vector<float> TChrCounts;
-    typedef std::vector<TChrCounts> TGenomicCounts;
-    typedef std::vector<TGenomicCounts> TFileCounts;
-    TFileCounts counts(c.gIntervals.size(), TGenomicCounts());
-    collectCounts(c, counts);
-    outputCounts(c, counts);
+    collectCounts(c);
 
     // End
     now = boost::posix_time::second_clock::local_time();
