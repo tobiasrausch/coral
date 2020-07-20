@@ -1,24 +1,3 @@
-/*
-============================================================================
-Coral: COpy-numbeR ALterations
-============================================================================
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
-============================================================================
-Contact: Tobias Rausch (rausch@embl.de)
-============================================================================
-*/
-
 #ifndef COUNT_H
 #define COUNT_H
 
@@ -34,14 +13,11 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include <htslib/sam.h>
 #include <htslib/faidx.h>
 
-#include "baf.h"
-#include "cnv.h"
 #include "bed.h"
 #include "version.h"
 #include "segment.h"
 #include "scan.h"
 #include "util.h"
-#include "gmm.h"
 
 namespace coralns
 {
@@ -50,7 +26,6 @@ namespace coralns
     bool hasStatsFile;
     bool hasBedFile;
     bool hasScanFile;
-    bool hasControlFile;
     bool noScanWindowSelection;
     uint32_t nchr;
     uint32_t meanisize;
@@ -60,10 +35,7 @@ namespace coralns
     uint32_t minChrLen;
     uint32_t minCnvSize;
     uint16_t minQual;
-    uint16_t minBaseQual;
     uint16_t mad;
-    uint16_t minCoverage;
-    uint16_t minSnps;
     uint16_t ploidy;
     float exclgc;
     float uniqueToTotalCovRatio;
@@ -75,18 +47,16 @@ namespace coralns
     boost::filesystem::path genome;
     boost::filesystem::path statsFile;
     boost::filesystem::path mapFile;
-    boost::filesystem::path controlFile;
     boost::filesystem::path bamFile;
     boost::filesystem::path bedFile;
-    boost::filesystem::path vcffile;
     boost::filesystem::path scanFile;
   };
 
 
   
-  template<typename TConfig, typename TGenomicVariants>
+  template<typename TConfig>
   inline int32_t
-  bamCount(TConfig const& c, LibraryInfo const& li, std::vector<GcBias> const& gcbias, std::pair<uint32_t, uint32_t> const& gcbound, TGenomicVariants const& cvar, TGenomicVariants const& gvar) {
+  bamCount(TConfig const& c, LibraryInfo const& li, std::vector<GcBias> const& gcbias, std::pair<uint32_t, uint32_t> const& gcbound) {
     // Load bam file
     samFile* samfile = sam_open(c.bamFile.string().c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
@@ -104,12 +74,6 @@ namespace coralns
       }
     }
 
-    // Estimate SD
-    SDAggregator sda(c.minCnvSize);
-
-    // CNV calls
-    std::vector<CNV> cnvCalls;
-	  
     // Parse BAM file
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Count fragments" << std::endl;
@@ -198,14 +162,7 @@ namespace coralns
       typedef std::vector<TCount> TCoverage;
       TCoverage cov(hdr->target_len[refIndex], 0);
 
-      // Split-read breakpoints
-      typedef std::pair<uint32_t, uint32_t> TPosSupport;
-      std::vector<TPosSupport> splitBp;
       {
-	// Split-read map
-	TCoverage splitCovLeft(hdr->target_len[refIndex], 0);
-	TCoverage splitCovRight(hdr->target_len[refIndex], 0);
-      
 	// Mate map
 	typedef boost::unordered_map<std::size_t, bool> TMateMap;
 	TMateMap mateMap;
@@ -216,48 +173,8 @@ namespace coralns
 	int32_t lastAlignedPos = 0;
 	std::set<std::size_t> lastAlignedPosReads;
 	while (sam_itr_next(samfile, iter, rec) >= 0) {
-	  if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP)) continue;
-	  if (rec->core.qual < c.minQual) continue;
-	  
-	  // Get clippings
-	  uint32_t rp = rec->core.pos; // reference pointer
-	  uint32_t sp = 0; // sequence pointer
-	  uint32_t* cigar = bam_get_cigar(rec);
-	  for (std::size_t i = 0; i < rec->core.n_cigar; ++i) {
-	    if ((bam_cigar_op(cigar[i]) == BAM_CMATCH) || (bam_cigar_op(cigar[i]) == BAM_CEQUAL) || (bam_cigar_op(cigar[i]) == BAM_CDIFF)) {
-	      rp += bam_cigar_oplen(cigar[i]);
-	      sp += bam_cigar_oplen(cigar[i]);
-	    } else if (bam_cigar_op(cigar[i]) == BAM_CDEL) {
-	      if (bam_cigar_oplen(cigar[i]) > c.minCnvSize) {
-		if ((rp >= 0) && (rp < hdr->target_len[refIndex]) && (splitCovRight[rp] < maxCoverage - 1)) ++splitCovRight[rp];
-	      }
-	      rp += bam_cigar_oplen(cigar[i]);
-	      if (bam_cigar_oplen(cigar[i]) > c.minCnvSize) {
-		if ((rp >= 0) && (rp < hdr->target_len[refIndex]) && (splitCovLeft[rp] < maxCoverage - 1)) ++splitCovLeft[rp];
-	      }
-	    } else if (bam_cigar_op(cigar[i]) == BAM_CINS) {
-	      sp += bam_cigar_oplen(cigar[i]);
-	    } else if ((bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) || (bam_cigar_op(cigar[i]) == BAM_CHARD_CLIP)) {
-	      bool scleft = false;
-	      if (sp == 0) scleft = true;
-	      sp += bam_cigar_oplen(cigar[i]);
-	      // Min clipping length of 10bp
-	      if (bam_cigar_oplen(cigar[i]) > 10) {
-		if ((rp >= 0) && (rp < hdr->target_len[refIndex])) {
-		  if (scleft) {
-		    if (splitCovLeft[rp] < maxCoverage - 1) ++splitCovLeft[rp];
-		  } else {
-		    if (splitCovRight[rp] < maxCoverage - 1) ++splitCovRight[rp];
-		  }
-		}
-	      }
-	    } else if (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP) {
-	      rp += bam_cigar_oplen(cigar[i]);
-	    } else std::cerr << "Warning: Unknown Cigar operation!" << std::endl;
-	  }
-	  
-	  // Exclude secondary/supplementary alignments
-	  if (rec->core.flag & (BAM_FSECONDARY | BAM_FSUPPLEMENTARY)) continue;
+	  if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP | BAM_FSECONDARY | BAM_FSUPPLEMENTARY)) continue;
+	  if (rec->core.qual < c.minQual) continue;	  
 	  if ((rec->core.flag & BAM_FPAIRED) && ((rec->core.flag & BAM_FMUNMAP) || (rec->core.tid != rec->core.mtid))) continue;
 
 	  int32_t midPoint = rec->core.pos + halfAlignmentLength(rec);
@@ -294,54 +211,7 @@ namespace coralns
 	if (ref != NULL) free(ref);
 	bam_destroy1(rec);
 	hts_itr_destroy(iter);
-
-	// Collect split-read breakpoints
-	_collectSplitBp(splitCovLeft, splitCovRight, splitBp, c.minCnvSize);
       }
-
-      // Output BAF
-      for(uint32_t i = 0; i < gvar[refIndex].size(); ++i) {
-	if (gvar[refIndex][i].ref + gvar[refIndex][i].alt > 0) {
-	  double baf_target = (double) gvar[refIndex][i].alt /	(double) (gvar[refIndex][i].ref + gvar[refIndex][i].alt);
-	  dataOutBaf << std::string(hdr->target_name[refIndex]) << "\t" << gvar[refIndex][i].pos << "\t" << gvar[refIndex][i].ref << "\t" << gvar[refIndex][i].alt << "\t" << baf_target;
-	  if ((c.hasControlFile) && (cvar[refIndex][i].ref + cvar[refIndex][i].alt > 0)) {
-	    double baf_control = (double) cvar[refIndex][i].alt / (double) (cvar[refIndex][i].ref + cvar[refIndex][i].alt);
-	    dataOutBaf << "\t" << cvar[refIndex][i].ref << "\t" << cvar[refIndex][i].alt << "\t" << baf_control;
-	  } else {
-	    dataOutBaf << "\t0\t0\t0.5";
-	  }
-	  dataOutBaf << std::endl;
-	}
-      }
-
-      // Estimate SDs
-      uint32_t widx = 0;
-      for(uint32_t ws = sda.wsinit; ws < 1000000; ws = ws * 2) {
-	for(uint32_t start = 0; start < hdr->target_len[refIndex]; start = start + ws) {
-	  if (start + ws < hdr->target_len[refIndex]) {
-	    double covsum = 0;
-	    double expcov = 0;
-	    for(uint32_t pos = start; pos < start + ws; ++pos) {
-	      if ((gcContent[pos] > gcbound.first) && (gcContent[pos] < gcbound.second) && (uniqContent[pos] >= c.fragmentUnique * c.meanisize)) {
-		covsum += cov[pos];
-		expcov += gcbias[gcContent[pos]].coverage;
-	      }
-	    }
-	    if (expcov > 0) {
-	      double cn = c.ploidy * covsum / expcov;
-	      sda.cnSUM[widx] += std::abs(cn - c.ploidy) * std::abs(cn - c.ploidy);
-	      ++sda.cnCount[widx];
-	    }
-	  }
-	}
-	++widx;
-      }
-      
-      // Call CNVs
-      callCNVs(c, gcbound, gcContent, uniqContent, gcbias, cov, hdr, refIndex, cnvCalls);
-      std::sort(cnvCalls.begin(), cnvCalls.end(), SortCNVs<CNV>());
-      breakpointRefinement(splitBp, refIndex, cnvCalls);
-      mafAnnotation(gvar[refIndex], refIndex, cnvCalls);
 
       // BED File (target intervals)
       if (c.hasBedFile) {
@@ -384,10 +254,7 @@ namespace coralns
 		      obsexp /= (double) winlen;
 		      double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
 		      double cn = c.ploidy * covsum / expcov;
-		      dataOutAdapt << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << winlen << "\t" << count << "\t" << cn;
-		      double maf = mafSegment(c, start, pos + 1, cvar[refIndex], gvar[refIndex]);
-		      if (maf != -1) dataOutAdapt << "\t" << maf << std::endl;
-		      else dataOutAdapt << "\tNA" << std::endl;
+		      dataOutAdapt << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << winlen << "\t" << count << "\t" << cn << std::endl;
 		      // reset
 		      covsum = 0;
 		      expcov = 0;
@@ -443,12 +310,9 @@ namespace coralns
 		obsexp /= (double) winlen;
 		double count = ((double) covsum / obsexp ) * (double) (it->second - it->first) / (double) winlen;
 		double cn = c.ploidy * covsum / expcov;
-		dataOutFixed << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\t" << winlen << "\t" << count << "\t" << cn;
-		double maf = mafSegment(c, it->first, it->second, cvar[refIndex], gvar[refIndex]);
-		if (maf != -1) dataOutFixed << "\t" << maf << std::endl;
-		else dataOutFixed << "\tNA" << std::endl;
+		dataOutFixed << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\t" << winlen << "\t" << count << "\t" << cn << std::endl;
 	      } else {
-		dataOutFixed << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\tNA\tNA\tNA\tNA" << std::endl;
+		dataOutFixed << std::string(hdr->target_name[refIndex]) << "\t" << it->first << "\t" << it->second << "\tNA\tNA\tNA" << std::endl;
 	      }
 	    }
 	  }
@@ -472,10 +336,7 @@ namespace coralns
 		obsexp /= (double) winlen;
 		double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
 		double cn = c.ploidy * covsum / expcov;
-		dataOutAdapt << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << winlen << "\t" << count << "\t" << cn;
-		double maf = mafSegment(c, start, pos + 1, cvar[refIndex], gvar[refIndex]);
-		if (maf != -1) dataOutAdapt << "\t" << maf << std::endl;
-		else dataOutAdapt << "\tNA" << std::endl;
+		dataOutAdapt << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (pos + 1) << "\t" << winlen << "\t" << count << "\t" << cn << std::endl;
 		// reset
 		covsum = 0;
 		expcov = 0;
@@ -523,10 +384,7 @@ namespace coralns
 		obsexp /= (double) winlen;
 		double count = ((double) covsum / obsexp ) * (double) c.window_size / (double) winlen;
 		double cn = c.ploidy * covsum / expcov;
-		dataOutFixed << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (start + c.window_size) << "\t" << winlen << "\t" << count << "\t" << cn;
-		double maf = mafSegment(c, start, start + c.window_size, cvar[refIndex], gvar[refIndex]);
-		if (maf != -1) dataOutFixed << "\t" << maf << std::endl;
-		else dataOutFixed << "\tNA" << std::endl;
+		dataOutFixed << std::string(hdr->target_name[refIndex]) << "\t" << start << "\t" << (start + c.window_size) << "\t" << winlen << "\t" << count << "\t" << cn << std::endl;
 	      }
 	    }
 	  }
@@ -534,9 +392,6 @@ namespace coralns
       }
     }
 
-    // Genotype CNVs
-    genotypeCNVs(c, sda, cnvCalls);
-	  
     // clean-up
     fai_destroy(faiRef);
     fai_destroy(faiMap);
@@ -588,15 +443,6 @@ namespace coralns
       ("no-window-selection,n", "no scan window selection")
       ;
     
-    boost::program_options::options_description vcopt("Variant options");
-    vcopt.add_options()
-      ("basequality,a", boost::program_options::value<uint16_t>(&c.minBaseQual)->default_value(10), "min. base quality")
-      ("snps,x", boost::program_options::value<uint16_t>(&c.minSnps)->default_value(3), "min. #SNPs per segment")
-      ("coverage,c", boost::program_options::value<uint16_t>(&c.minCoverage)->default_value(10), "min. SNP coverage")
-      ("vcffile,v", boost::program_options::value<boost::filesystem::path>(&c.vcffile), "input VCF file")
-      ("controlfile,l", boost::program_options::value<boost::filesystem::path>(&c.controlFile), "control file")
-      ;
-
     boost::program_options::options_description hidden("Hidden options");
     hidden.add_options()
       ("statsfile,t", boost::program_options::value<boost::filesystem::path>(&c.statsFile), "stats output file")
@@ -608,9 +454,9 @@ namespace coralns
 
     // Set the visibility
     boost::program_options::options_description cmdline_options;
-    cmdline_options.add(generic).add(window).add(gcopt).add(vcopt).add(hidden);
+    cmdline_options.add(generic).add(window).add(gcopt).add(hidden);
     boost::program_options::options_description visible_options;
-    visible_options.add(generic).add(window).add(gcopt).add(vcopt);
+    visible_options.add(generic).add(window).add(gcopt);
 
     // Parse command-line
     boost::program_options::variables_map vm;
@@ -636,10 +482,6 @@ namespace coralns
     if (vm.count("statsfile")) c.hasStatsFile = true;
     else c.hasStatsFile = false;
 
-    // Control file
-    if (vm.count("controlfile")) c.hasControlFile = true;
-    else c.hasControlFile = false;
-    
     // BED intervals
     if (vm.count("bed-intervals")) c.hasBedFile = true;
     else c.hasBedFile = false;
@@ -736,22 +578,6 @@ namespace coralns
       sam_close(samfile);
     }
 
-    // B-allele frequency
-    typedef std::vector<BiallelicSupport> TVariantSupport;
-    typedef std::vector<TVariantSupport> TGenomicVariants;
-    TGenomicVariants gvar(c.nchr, TVariantSupport());
-    TGenomicVariants cvar(c.nchr, TVariantSupport());
-    c.controlMaf = 0.5;
-    if (vm.count("vcffile")) {
-      if (c.hasControlFile) {
-	baf(c, true, cvar);  // Het. germline variants
-	c.controlMaf = baf(c, false, cvar, gvar);
-      } else {
-	// Tumor-only
-	c.controlMaf = baf(c, false, gvar);
-      }
-    }
-
     // Scan genomic windows
     typedef std::vector<ScanWindow> TWindowCounts;
     typedef std::vector<TWindowCounts> TGenomicWindowCounts;
@@ -786,7 +612,7 @@ namespace coralns
     }
     
     // Count reads
-    int32_t ret = bamCount(c, li, gcbias, gcbound, cvar, gvar);
+    int32_t ret = bamCount(c, li, gcbias, gcbound);
     if (ret != 0) return ret;
 
     // Segment
